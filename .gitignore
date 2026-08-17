@@ -1,0 +1,10 @@
+# ローカル実行でできるログ
+server.log
+
+# OS / エディタ
+Thumbs.db
+.DS_Store
+.vscode/
+
+# 変換前の元画像（配信には使わないので Git には入れない）
+assets-original/

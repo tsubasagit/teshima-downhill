@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>豊島ダウンヒル</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="canvasWrap"></div>
+<div id="speedVignette" aria-hidden="true"></div>
+<div id="impactFlash" aria-hidden="true"></div>
+<div id="pickupFlash" aria-hidden="true"></div>
+
+<div id="hud">
+  <div id="progressBox">
+    <div id="progressFill"></div>
+    <span id="progressLabel">レベル 1</span>
+    <span id="progressFlag">🏁</span>
+  </div>
+  <div id="lemonBox"><span class="icon">🍋</span><span id="lemonCount">0</span></div>
+</div>
+<div id="livesBox"></div>
+
+<div id="startScreen" class="overlay">
+  <h1>豊島ダウンヒル</h1>
+  <p>瀬戸内海へ下る坂道を、スケボーでかけぬけよう。<br>← → キー、またはがめんの左右タップで うごく。<br>レモンをあつめて、フェリーの見える港をめざそう。</p>
+  <button id="startBtn">🛹 タップしてスタート</button>
+</div>
+
+<div id="gameOverScreen" class="overlay hidden">
+  <h1>ゲームオーバー</h1>
+  <div class="bigScore">🍋 <span id="finalLemons">0</span></div>
+  <p class="subScore">これまでの さいこう記録 🍋 <span id="finalBest">0</span></p>
+  <button id="retryBtn">もう一度はしる</button>
+</div>
+
+<div id="clearScreen" class="overlay hidden">
+  <h1>ゴール！港に着いたよ 🚢</h1>
+  <div class="bigScore">🍋 <span id="clearLemons">0</span></div>
+  <p class="subScore"><span id="clearLap">1</span> 周目クリア ／ さいこう記録 🍋 <span id="clearBest">0</span></p>
+  <button id="nextBtn">もう一周はしる</button>
+</div>
+
+<div id="fileModeScreen" class="overlay hidden">
+  <h1>画像版であそぶ準備</h1>
+  <p>このページを直接開くと、ブラウザの制限でキャラクター画像を読み込めません。<br>同じフォルダの <code>start-game.cmd</code> をダブルクリックしてください。</p>
+  <a class="launchLink" href="http://127.0.0.1:8940/index.html">サーバー起動済みなら開く</a>
+</div>
+
+<script>
+(() => {
+  if (location.protocol === 'file:') {
+    document.getElementById('startScreen').classList.add('hidden');
+    document.getElementById('hud').classList.add('hidden');
+    document.getElementById('livesBox').classList.add('hidden');
+    document.getElementById('fileModeScreen').classList.remove('hidden');
+    return;
+  }
+
+  const threeScript = document.createElement('script');
+  threeScript.src = 'https://unpkg.com/three@0.128.0/build/three.min.js';
+  threeScript.onload = () => {
+    const gameScript = document.createElement('script');
+    gameScript.src = 'game.js';
+    document.body.appendChild(gameScript);
+  };
+  threeScript.onerror = () => {
+    document.querySelector('#startScreen p').textContent = 'ゲームエンジンを読み込めませんでした。インターネット接続を確認して、もう一度開いてください。';
+    document.getElementById('startBtn').classList.add('hidden');
+  };
+  document.body.appendChild(threeScript);
+})();
+</script>
+</body>
+</html>
+
