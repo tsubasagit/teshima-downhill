@@ -55,6 +55,7 @@ const CONFIG = {
   guidePostSpacing: 7,    // 大カーブの黄色ポールの間隔
   raftCount: 9,           // 海にうかぶ養殖いかだの数
   ridgeLayers: 3,         // 対岸の山なみのレイヤー数
+  groundTileSize: 30,     // 地面の絵1枚が覆う広さ（ユニット）。大きいほど筆づかいが大きく出る
 };
 
 /* ------------------------- 2. COURSE ★かえてみよう -------------------------
@@ -542,6 +543,7 @@ function makeCloudCluster(rng, tall = false) {
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, tall ? 2.4 : 1.6), mat);
     g.add(plane);
     g.userData.billboard = true;
+    g.userData.sky = true;   // 空にうかぶ板だけは、カメラのかたむきごと向く
     return g;
   }
   const g = new THREE.Group();
@@ -948,7 +950,7 @@ function makeHouse(rng) {
   // 切妻屋根。三角柱を横に倒してつくる。
   const roof = new THREE.Mesh(
     sharedGeo('houseRoof', () => new THREE.CylinderGeometry(d * 0.72, d * 0.72, w * 1.06, 3)),
-    sharedMat('houseRoof', () => new THREE.MeshLambertMaterial({ color: 0x4a4038, flatShading: true }))
+    sharedMat('houseRoof', () => new THREE.MeshLambertMaterial({ color: 0x4a4038 }))
   );
   roof.rotation.z = Math.PI / 2;
   roof.rotation.y = Math.PI / 2;
@@ -1055,15 +1057,20 @@ function buildScenery(path, totalLength) {
 
   // 道路脇を3段に分ける。大きな平面1枚ではなく、高低差のある草地と石垣にする。
   // 大きな筆跡・土・小花が遠くでも残るよう、細かい反復をやめて低回数で貼る。
-  const makeGroundMat = (xRepeat, tint) => {
+  // UV は「帯の幅ぜんぶで 0→1」「コース全長で 0→1」でつくってある。
+  // そのため横と縦で「1タイルが覆うユニット数」をそろえないと、
+  // 草が進行方向へ引きのばされて、地面が縞のように見えてしまう。
+  const tile = CONFIG.groundTileSize;
+  const alongRepeat = Math.max(4, Math.round(totalLength / tile));
+  // 引数は「その材質を貼る帯のだいたいの幅」。左右で幅がちがうので平均を渡す。
+  const makeGroundMat = (bandWidth, tint) => {
     const material = new THREE.MeshLambertMaterial({ color: tint });
     material.userData.textureTint = tint;
-    return useTex('ground', material, [xRepeat, Math.max(4.5, totalLength / 220)]);
+    return useTex('ground', material, [bandWidth / tile, alongRepeat]);
   };
-  // 広い斜面へ横1枚を引き伸ばすと縞になるため、帯の幅に合わせて横の反復数を変える。
-  const grassNearMat = makeGroundMat(1.35, 0xaab99e);
-  const grassMidMat = makeGroundMat(3.2, 0x9fb394);
-  const grassFarMat = makeGroundMat(6.0, 0x96aa8d);
+  const grassNearMat = makeGroundMat(6.1, 0xaab99e);
+  const grassMidMat = makeGroundMat(14.4, 0x9fb394);
+  const grassFarMat = makeGroundMat(31, 0x96aa8d);
   worldGroup.add(buildRibbon(path, -roadHalf - 7, -roadHalf, grassNearMat, -0.06, totalLength));
   worldGroup.add(buildSlopedRibbon(path, -roadHalf - 24, -roadHalf - 7, grassMidMat, 2.0, 0.82, totalLength, 0.55));
   worldGroup.add(buildSlopedRibbon(path, -roadHalf - 58, -roadHalf - 24, grassFarMat, 4.1, 2.0, totalLength, 1.0));
@@ -1189,8 +1196,10 @@ function buildScenery(path, totalLength) {
 
   // 新しい横長素材を距離と高さをずらして重ね、同じ草1枚の反復を目立たなくする。
   const layeredScenery = [
-    { texture: TEX.meadowBankA, width: 24, height: 7.7, step: 27, near: 11.8, lift: 0.58 },
-    { texture: TEX.meadowBankB, width: 20, height: 6.4, step: 39, near: 17.5, lift: 0.94 },
+    // near（道からの距離）は かならず width の半分より大きくする。
+    // 近すぎる大きな板は、カーブでカメラの正面へ回りこんで視界をふさぐ。
+    { texture: TEX.meadowBankA, width: 17, height: 6.4, step: 27, near: 15.5, lift: 0.58 },
+    { texture: TEX.meadowBankB, width: 15, height: 5.4, step: 39, near: 19.0, lift: 0.94 },
     { texture: TEX.fantasyHedge, width: 16, height: 5.3, step: 25, near: 13.2, lift: 0.55 },
     { texture: TEX.fantasySlope, width: 21, height: 7.2, step: 76, near: 16.5, lift: 1.2 },
     { texture: TEX.fantasyGrove, width: 25, height: 11.4, step: 54, near: 28, lift: 2.25 },
@@ -1398,18 +1407,22 @@ function buildScenery(path, totalLength) {
   }
 
   // 対岸の山なみ。遠い層ほど空の色に近づけると、いっきに奥ゆきが出る。
-  const ridgeTints = [0x6d9cb8, 0x87b0c6, 0x9fc2d2];
+  // 山をひとつずつ離して置くと「海にうかぶサメのひれ」に見えてしまう。
+  // 半径を となり同士の間隔より大きくして重ね、ひとつづきの稜線にする。
+  const ridgeTints = [0x8fb6c6, 0xa6c8d4, 0xbad7de];
   for (let layer = 0; layer < CONFIG.ridgeLayers; layer++) {
     const ahead = 1250 + layer * 420;
     const scale = 1 + layer * 0.45;
+    const gap = 150 * scale;
     // 霧の色を焼きこんだ単色。fog を切らないと遠すぎて消えてしまう。
-    const ridgeMat = new THREE.MeshBasicMaterial({ color: ridgeTints[layer] || 0x9fc2d2, fog: false });
+    const ridgeMat = new THREE.MeshBasicMaterial({ color: ridgeTints[layer] || 0xbad7de, fog: false });
     for (let i = -7; i <= 7; i++) {
-      const r = (95 + rng() * 85) * scale;
-      const peak = new THREE.Mesh(new THREE.ConeGeometry(r, r * (0.28 + rng() * 0.16), 6), ridgeMat);
+      const r = gap * 1.15 + rng() * gap * 0.5;
+      // 高さは半径の2割ほど。とがらせるほど「対岸の島」ではなく「岩」に見える。
+      const peak = new THREE.Mesh(new THREE.ConeGeometry(r, r * (0.17 + rng() * 0.09), 6), ridgeMat);
       const rp = end.pos.clone()
-        .addScaledVector(end.forward, ahead + (rng() - 0.5) * 220)
-        .addScaledVector(end.right, i * 175 * scale + (rng() - 0.5) * 90);
+        .addScaledVector(end.forward, ahead + (rng() - 0.5) * 160)
+        .addScaledVector(end.right, i * gap + (rng() - 0.5) * 45);
       peak.position.set(rp.x, seaY, rp.z);
       worldGroup.add(peak);
     }
@@ -1428,16 +1441,24 @@ function buildScenery(path, totalLength) {
   }
 
   // 右手にそびえる壇山の稜線。「平らな緑」を断ち切る。
-  const mountainMat = new THREE.MeshLambertMaterial({ color: 0x4f7f45, flatShading: true });
+  // MeshLambertMaterial は flatShading を持たない（警告が出るだけで効かない）ので Phong を使う。
+  // 山は霧（260ユニットから）より手前に立つので、霧では ぼかせない。
+  // かわりに 奥の列ほど空の色をまぜた緑にして、自前で かすませる。
+  const mountainMats = [
+    new THREE.MeshPhongMaterial({ color: 0x5f8d55, flatShading: true, shininess: 2 }),
+    new THREE.MeshPhongMaterial({ color: 0x86a882, flatShading: true, shininess: 2 }),
+  ];
   for (let d = 60; d < totalLength; d += 120) {
     const s = sampleAt(path, d);
     for (let k = 0; k < 2; k++) {
-      const r = 46 + rng() * 34;
-      const hill = new THREE.Mesh(new THREE.ConeGeometry(r, r * (0.5 + rng() * 0.3), 7), mountainMat);
+      const r = 52 + rng() * 40;
+      // とがらせるほど「山」ではなく「三角の板」に見える。低くて丸い稜線にする。
+      const hill = new THREE.Mesh(new THREE.ConeGeometry(r, r * (0.32 + rng() * 0.16), 7), mountainMats[k]);
       // 山のふもとが道路へせり出さないよう、半径のぶんだけ必ず右へ逃がす
       const offset = roadHalf + 46 + r + k * 58 + rng() * 30;
       const hp = s.pos.clone().addScaledVector(s.right, offset);
-      hill.position.set(hp.x, s.pos.y - 6 + k * 4, hp.z);
+      // 深めに沈めて、ふもとを道ばたの草むらの後ろへ隠す
+      hill.position.set(hp.x, s.pos.y - 11 + k * 5, hp.z);
       worldGroup.add(hill);
     }
   }
@@ -1955,8 +1976,15 @@ function animate() {
 
   applyPendingRebuilds();
 
-  // 雲などの板は つねにカメラを向ける
-  for (const b of billboards) b.quaternion.copy(camera.quaternion);
+  // 板はカメラのほうを向く。ただし地面に立っているものは たてのまま向きだけ変える。
+  // カメラのかたむきまで真似ると、下り坂で板がのけぞり、足もとが地面から浮いて見える。
+  for (const b of billboards) {
+    if (b.userData.sky) {
+      b.quaternion.copy(camera.quaternion);
+    } else {
+      b.rotation.set(0, Math.atan2(camera.position.x - b.position.x, camera.position.z - b.position.z), 0);
+    }
+  }
 
   const time = performance.now() * 0.001;
 
