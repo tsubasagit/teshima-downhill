@@ -8,3 +8,9 @@ Thumbs.db
 
 # 変換前の元画像（配信には使わないので Git には入れない）
 assets-original/
+
+# 収録した動画（配信には使わない）
+*.mp4
+
+# Claude Code のローカル起動設定
+.claude/

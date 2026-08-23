@@ -5,9 +5,9 @@
    2. COURSE      … ★改造ポイント2（坂道のカーブをつくる）
    3. シーン構築   … 空・海・棚田・道路・ガードレールをつくる
    4. プレイヤー   … スケーターを組み立てて うごかす
-   5. スポナー     … 障害物とレモンをコースにならべる
+   5. スポナー     … 障害物をコースにならべる
    6. 当たり判定   … ★改造ポイント3（新しいルールはここに追加）
-   7. HUD         … 進捗バー・レモン数・ライフの表示
+   7. HUD         … 進捗バー・ライフの表示
    8. ゲームループ … 毎フレームの更新と描画
    9. 入力        … キーボード・タッチ操作
    ========================================================================= */
@@ -23,7 +23,7 @@ const CONFIG = {
   laneSpacing: 3.2,       // 3つの走行位置を、現地の幅へ収める
   lives: 3,               // ライフ数
   obstacleDensity: 0.32,  // 障害物の出やすさ (0〜1、大きいほど増える)
-  lemonSpacing: [16, 30], // レモン/障害物のだいたいの間隔 [さいしょう, さいだい]
+  obstacleSpacing: [16, 30], // 障害物を置く候補地点の間隔 [さいしょう, さいだい]
   jacketColor: 0x4aa8e8,  // パーカーの色 (0xRRGGBB)
   boardColor: 0xe07a2e,   // スケボーの色
   slopeRate: 0.24,        // 坂の基本勾配（約13.5度）
@@ -106,6 +106,10 @@ function loadTex(key, file, repeat, fallbackFile) {
   loader.load(
     'assets/' + file,
     tex => {
+      // 坂を浅い角度から見ると草地が線状に潰れるため、斜め方向の縮小表示を補正する。
+      if (renderer?.capabilities) {
+        tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+      }
       if (repeat) {
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
         tex.repeat.set(repeat[0], repeat[1]);
@@ -147,7 +151,6 @@ scene.add(camera);
 
 const speedVignette = document.getElementById('speedVignette');
 const impactFlash = document.getElementById('impactFlash');
-const pickupFlash = document.getElementById('pickupFlash');
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 window.addEventListener('resize', () => {
@@ -351,11 +354,15 @@ function applyTex(tex, material, repeat) {
   if (repeat) {
     t = tex.clone();
     t.needsUpdate = true;
+    if (renderer?.capabilities) {
+      t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    }
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.repeat.set(repeat[0], repeat[1]);
   }
   material.map = t;
-  material.color.setHex(0xffffff);
+  // 地表などは画像の色を少し落ち着かせたいので、素材ごとの色味を残せるようにする。
+  material.color.setHex(material.userData.textureTint || 0xffffff);
   material.needsUpdate = true;
 }
 function onTextureReady(key, tex) {
@@ -389,7 +396,8 @@ function applyPendingRebuilds() {
     'fantasyTreeA', 'fantasyTreeB', 'fantasyTerrace', 'fantasyBranch',
     'fantasyObstacle', 'fantasyTruck', 'fantasyBus', 'fantasyHedge',
     'fantasyGrove', 'fantasySlope', 'harborMirror', 'harborSeawall',
-    'harborCars', 'harborShelter', 'harborParking',
+    'harborCars', 'harborShelter', 'harborParking', 'villageHouseA',
+    'villageHouseB', 'meadowBankA', 'meadowBankB',
   ];
   if (sceneryKeys.some(key => pendingRebuild[key])) {
     for (const key of sceneryKeys) pendingRebuild[key] = false;
@@ -409,7 +417,7 @@ loadTex('sky', 'sky_sea_panorama.jpg', undefined, 'sky_fantasy.jpg');
 loadTex('sea', 'sea_surface_fantasy_v2.jpg', undefined, 'sea_tile.jpg');
 loadTex('road', 'road_asphalt_teshima.jpg', undefined, 'road_stone_tile.jpg');
 loadTex('wall', 'stone_wall_tile.jpg');
-loadTex('ground', 'ground_fantasy_tile.jpg');
+loadTex('ground', 'meadow_ground_v3.jpg', undefined, 'meadow_ground_v2.jpg');
 loadTex('shop', 'shop_front.jpg');
 loadTex('cloud', 'cloud_cumulus.webp');
 loadTex('fantasyGrass', 'grass_fantasy.webp');
@@ -430,6 +438,10 @@ loadTex('harborSeawall', 'harbor_seawall.webp');
 loadTex('harborCars', 'harbor_cars.webp');
 loadTex('harborShelter', 'harbor_shelter.webp');
 loadTex('harborParking', 'harbor_parking_tile.jpg');
+loadTex('villageHouseA', 'village_house_b.webp');
+loadTex('villageHouseB', 'village_house_c.webp');
+loadTex('meadowBankA', 'meadow_bank_a.webp');
+loadTex('meadowBankB', 'meadow_bank_b.webp');
 loadTex('skater', 'skater_back.webp');
 loadTex('skaterLeft', 'skater_left_v2.webp', undefined, 'skater_left.webp');
 loadTex('skaterRight', 'skater_right.webp');
@@ -604,8 +616,31 @@ function makeFantasyGrass(rng) {
   return grass;
 }
 
+function makeVillagePicture(textures, rng, width = 10.8, height = 8.0) {
+  const available = textures.filter(Boolean);
+  if (!available.length) return null;
+  const texture = available[Math.floor(rng() * available.length)];
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    alphaTest: 0.06,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+  plane.position.y = height * 0.46;
+  g.add(plane);
+  // 生成画像自体が3/4視点なので、カメラへ向けても正面一枚絵には見えない。
+  g.userData.billboard = true;
+  g.scale.setScalar(0.82 + rng() * 0.34);
+  return g;
+}
+
 function makeShop(rng) {
-  // 画像があれば 商店の正面いちまい絵
+  const depthHouse = makeVillagePicture([TEX.villageHouseA, TEX.villageHouseB], rng, 11.8, 8.5);
+  if (depthHouse) return depthHouse;
+  // 新しい家が読めない場合だけ、従来の商店画像へ戻す。
   if (TEX.shop) {
     const g = new THREE.Group();
     const mat = new THREE.MeshBasicMaterial({ map: TEX.shop, transparent: true, side: THREE.DoubleSide });
@@ -897,7 +932,9 @@ function makeRoadText(text, width) {
 
 // 島の民家（白い壁＋こげ茶の切妻屋根）。集落はこれをかたまりで置く。
 function makeHouse(rng) {
-  // 3種類の形を使いまわし、大きさのばらつきは scale で出す（描画を軽くする）
+  const pictureHouse = makeVillagePicture([TEX.villageHouseA, TEX.villageHouseB], rng, 9.6, 7.2);
+  if (pictureHouse) return pictureHouse;
+  // 画像がない環境では、従来の軽量3D家へフォールバックする。
   const variant = Math.floor(rng() * 3);
   const w = 4.0, d = 3.6, h = 2.5;
   const g = new THREE.Group();
@@ -1017,12 +1054,21 @@ function buildScenery(path, totalLength) {
   }
 
   // 道路脇を3段に分ける。大きな平面1枚ではなく、高低差のある草地と石垣にする。
-  const grassMat = useTex('ground', new THREE.MeshLambertMaterial({ color: 0x63b24f }), [11, totalLength / 12]);
-  worldGroup.add(buildRibbon(path, -roadHalf - 7, -roadHalf, grassMat, -0.06, totalLength));
-  worldGroup.add(buildSlopedRibbon(path, -roadHalf - 24, -roadHalf - 7, grassMat, 2.0, 0.82, totalLength, 0.55));
-  worldGroup.add(buildSlopedRibbon(path, -roadHalf - 58, -roadHalf - 24, grassMat, 4.1, 2.0, totalLength, 1.0));
+  // 大きな筆跡・土・小花が遠くでも残るよう、細かい反復をやめて低回数で貼る。
+  const makeGroundMat = (xRepeat, tint) => {
+    const material = new THREE.MeshLambertMaterial({ color: tint });
+    material.userData.textureTint = tint;
+    return useTex('ground', material, [xRepeat, Math.max(4.5, totalLength / 220)]);
+  };
+  // 広い斜面へ横1枚を引き伸ばすと縞になるため、帯の幅に合わせて横の反復数を変える。
+  const grassNearMat = makeGroundMat(1.35, 0xaab99e);
+  const grassMidMat = makeGroundMat(3.2, 0x9fb394);
+  const grassFarMat = makeGroundMat(6.0, 0x96aa8d);
+  worldGroup.add(buildRibbon(path, -roadHalf - 7, -roadHalf, grassNearMat, -0.06, totalLength));
+  worldGroup.add(buildSlopedRibbon(path, -roadHalf - 24, -roadHalf - 7, grassMidMat, 2.0, 0.82, totalLength, 0.55));
+  worldGroup.add(buildSlopedRibbon(path, -roadHalf - 58, -roadHalf - 24, grassFarMat, 4.1, 2.0, totalLength, 1.0));
   // 右の草地を擁壁までつなぎ、間から低い海面がのぞく隙間を完全にふさぐ。
-  worldGroup.add(buildRibbon(path, roadHalf, roadHalf + 5.2, grassMat, -0.06, totalLength));
+  worldGroup.add(buildRibbon(path, roadHalf, roadHalf + 5.2, grassNearMat, -0.06, totalLength));
 
   // 白線の外には短い砂利肩を置き、大きな草画像がアスファルトへ触れない余白をつくる。
   const shoulderMat = new THREE.MeshLambertMaterial({ color: 0x9aa59d });
@@ -1055,8 +1101,8 @@ function buildScenery(path, totalLength) {
   const stoneMatR = useTex('wall', new THREE.MeshLambertMaterial({ color: 0xbdb49e }), [totalLength / 6, 1]);
   worldGroup.add(buildWall(path, -roadHalf - 7, 0.92, stoneMatR, -0.06, totalLength));
   worldGroup.add(buildWall(path, roadHalf + 5.2, 1.15, stoneMatR, -0.05, totalLength));
-  worldGroup.add(buildSlopedRibbon(path, roadHalf + 17, roadHalf + 5.2, grassMat, 2.3, 1.02, totalLength, 0.6));
-  worldGroup.add(buildSlopedRibbon(path, roadHalf + 45, roadHalf + 17, grassMat, 4.8, 2.3, totalLength, 1.15));
+  worldGroup.add(buildSlopedRibbon(path, roadHalf + 17, roadHalf + 5.2, grassMidMat, 2.3, 1.02, totalLength, 0.6));
+  worldGroup.add(buildSlopedRibbon(path, roadHalf + 45, roadHalf + 17, grassFarMat, 4.8, 2.3, totalLength, 1.15));
 
   // 電柱と電線を右側にとおす。日本の田舎道らしさは これが効く。
   let prevPole = null;
@@ -1143,6 +1189,8 @@ function buildScenery(path, totalLength) {
 
   // 新しい横長素材を距離と高さをずらして重ね、同じ草1枚の反復を目立たなくする。
   const layeredScenery = [
+    { texture: TEX.meadowBankA, width: 24, height: 7.7, step: 27, near: 11.8, lift: 0.58 },
+    { texture: TEX.meadowBankB, width: 20, height: 6.4, step: 39, near: 17.5, lift: 0.94 },
     { texture: TEX.fantasyHedge, width: 16, height: 5.3, step: 25, near: 13.2, lift: 0.55 },
     { texture: TEX.fantasySlope, width: 21, height: 7.2, step: 76, near: 16.5, lift: 1.2 },
     { texture: TEX.fantasyGrove, width: 25, height: 11.4, step: 54, near: 28, lift: 2.25 },
@@ -1185,7 +1233,8 @@ function buildScenery(path, totalLength) {
     const shop = makeShop(rng);
     const p = s.pos.clone().addScaledVector(s.right, roadHalf + 7.5);
     shop.position.set(p.x, p.y + 1.15, p.z);
-    shop.rotation.y = -s.heading - Math.PI / 2;
+    if (shop.userData.billboard) billboards.push(shop);
+    else shop.rotation.y = -s.heading - Math.PI / 2;
     worldGroup.add(shop);
   }
 
@@ -1209,7 +1258,8 @@ function buildScenery(path, totalLength) {
       const lift = village.side > 0 ? 1.2 : -0.4;
       house.position.set(p.x, p.y + lift, p.z);
       // 家の向きは道と平行を基本に、すこしだけ ばらけさせる
-      house.rotation.y = -s.heading + (rng() - 0.5) * 0.6;
+      if (house.userData.billboard) billboards.push(house);
+      else house.rotation.y = -s.heading + (rng() - 0.5) * 0.6;
       worldGroup.add(house);
     }
   }
@@ -1643,27 +1693,6 @@ function makeCrate() {
   return g;
 }
 
-function makeLemon() {
-  const g = new THREE.Group();
-  const lemon = new THREE.Mesh(new THREE.SphereGeometry(0.26, 10, 8), new THREE.MeshLambertMaterial({ color: 0xf5e04a }));
-  lemon.scale.set(1, 0.85, 1.3);
-  lemon.position.y = 1.0;
-  g.add(lemon);
-  g.userData.halfWidth = 0.4; g.userData.spin = true; g.userData.baseY = 1.0;
-  return g;
-}
-
-function makeStrawberry() {
-  const g = new THREE.Group();
-  const berry = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), new THREE.MeshLambertMaterial({ color: 0xe24b4a }));
-  berry.position.y = 1.0;
-  const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.16, 6), new THREE.MeshLambertMaterial({ color: 0x639922 }));
-  leaf.position.y = 1.24;
-  g.add(berry, leaf);
-  g.userData.halfWidth = 0.4; g.userData.spin = true; g.userData.baseY = 1.0; g.userData.bonus = true;
-  return g;
-}
-
 const OBSTACLE_BUILDERS = [makeTruck, makeBus, makeCrate];
 
 
@@ -1681,43 +1710,26 @@ function spawnItems(path, totalLength, level) {
   const rng = mulberry32(1234 + level * 97);
   const items = [];
   let d = 60;
-  const [minGap, maxGap] = CONFIG.lemonSpacing;
+  const [minGap, maxGap] = CONFIG.obstacleSpacing;
   while (d < totalLength - 90) {
-    const lane = Math.floor(rng() * 3) - 1;
-    let group;
+    // レモンを生成せず、同じ候補地点の一部にだけ障害物を置く。
     if (rng() < CONFIG.obstacleDensity) {
+      const lane = Math.floor(rng() * 3) - 1;
       const build = OBSTACLE_BUILDERS[Math.floor(rng() * OBSTACLE_BUILDERS.length)];
-      group = build();
+      const group = build();
       group.userData.kind = 'obstacle';
-    } else {
-      group = makeLemon();
-      group.userData.kind = 'lemon';
+      const s = sampleAt(path, d);
+      const p = s.pos.clone().addScaledVector(s.right, lane * CONFIG.laneSpacing);
+      group.position.set(p.x, p.y, p.z);
+      group.rotation.order = 'YXZ';
+      group.rotation.y = Math.PI - s.heading;
+      group.rotation.x = s.pitch;
+      group.userData.dist = d;
+      group.userData.laneX = lane * CONFIG.laneSpacing;
+      worldGroup.add(group);
+      items.push(group);
     }
-    const s = sampleAt(path, d);
-    const p = s.pos.clone().addScaledVector(s.right, lane * CONFIG.laneSpacing);
-    group.position.set(p.x, p.y, p.z);
-    group.rotation.order = 'YXZ';
-    group.rotation.y = Math.PI - s.heading;
-    if (group.userData.kind === 'obstacle') group.rotation.x = s.pitch;
-    group.userData.dist = d;
-    group.userData.laneX = lane * CONFIG.laneSpacing;
-    worldGroup.add(group);
-    items.push(group);
     d += minGap + rng() * (maxGap - minGap);
-  }
-  // ボーナスいちご
-  for (let i = 1; i * 480 < totalLength - 150; i++) {
-    const bd = 150 + i * 480 + rng() * 80;
-    const lane = Math.floor(rng() * 3) - 1;
-    const berry = makeStrawberry();
-    const s = sampleAt(path, bd);
-    const p = s.pos.clone().addScaledVector(s.right, lane * CONFIG.laneSpacing);
-    berry.position.set(p.x, p.y, p.z);
-    berry.userData.dist = bd;
-    berry.userData.laneX = lane * CONFIG.laneSpacing;
-    berry.userData.kind = 'lemon';
-    worldGroup.add(berry);
-    items.push(berry);
   }
   return items;
 }
@@ -1728,7 +1740,6 @@ const state = {
   level: 1,
   distance: 0,
   totalLength: 0,
-  lemons: 0,
   lives: CONFIG.lives,
   xOffset: 0,
   xVel: 0,
@@ -1737,10 +1748,8 @@ const state = {
   cameraShakeT: 0,
   crest: 0,
   lap: 1,
-  bestLemons: 0,
   speedScale: 1,
   impactFlash: 0,
-  pickupFlash: 0,
   invincibleT: 0,
   running: false,
   path: null,
@@ -1752,12 +1761,10 @@ let player = buildPlayer();
 // 画像がとどいたあと、いまのレベルを組み立てなおす（進行状況はそのまま）
 function rebuildLevel() {
   const keepDistance = state.distance;
-  const keepLemons = state.lemons;
   const keepLives = state.lives;
   const wasRunning = state.running;
   startLevel(state.level);
   state.distance = keepDistance;
-  state.lemons = keepLemons;
   state.lives = keepLives;
   state.running = wasRunning;
   renderLives();
@@ -1786,7 +1793,6 @@ function startLevel(level) {
   state.cameraShakeT = 0;
   state.crest = 0;
   state.impactFlash = 0;
-  state.pickupFlash = 0;
   state.lives = CONFIG.lives;
   state.invincibleT = 0;
 
@@ -1819,7 +1825,6 @@ function renderLives() {
 function updateHUD() {
   const pct = Math.min(100, (state.distance / state.totalLength) * 100);
   document.getElementById('progressFill').style.width = pct + '%';
-  document.getElementById('lemonCount').textContent = state.lemons;
 }
 
 
@@ -1834,13 +1839,7 @@ function checkCollisions() {
     const dx = item.userData.laneX - state.xOffset;
     if (Math.abs(dx) > (item.userData.halfWidth + 0.4)) continue;
 
-    if (item.userData.kind === 'lemon') {
-      item.userData.hit = true;
-      createBurst(item.position.clone(), item.userData.bonus ? 0xff5b72 : 0xffe45c, item.userData.bonus ? 28 : 16);
-      worldGroup.remove(item);
-      state.lemons += item.userData.bonus ? 10 : 1;
-      state.pickupFlash = item.userData.bonus ? 0.8 : 0.42;
-    } else if (state.invincibleT <= 0) {
+    if (state.invincibleT <= 0) {
       state.lives -= 1;
       state.invincibleT = 1.2;
       state.cameraShakeT = CONFIG.hitShake;
@@ -1932,9 +1931,7 @@ function updateBursts(dt) {
 
 function updateScreenFeedback(dt) {
   state.impactFlash = Math.max(0, state.impactFlash - dt * 3.8);
-  state.pickupFlash = Math.max(0, state.pickupFlash - dt * 3.5);
   impactFlash.style.opacity = (state.impactFlash * 0.55).toFixed(3);
-  pickupFlash.style.opacity = (state.pickupFlash * 0.48).toFixed(3);
   speedVignette.style.opacity = state.running ? '0.72' : '0';
 }
 
@@ -1961,17 +1958,7 @@ function animate() {
   // 雲などの板は つねにカメラを向ける
   for (const b of billboards) b.quaternion.copy(camera.quaternion);
 
-  // アイテムの浮遊アニメーション
   const time = performance.now() * 0.001;
-  const t = time * 3;
-  for (const item of state.items) {
-    if (item.userData.spin && !item.userData.hit) {
-      item.rotation.y += dt * 2;
-      item.position.y = item.userData.baseY !== undefined
-        ? sampleAt(state.path, item.userData.dist).pos.y + item.userData.baseY + Math.sin(t + item.userData.dist) * 0.06
-        : item.position.y;
-    }
-  }
 
   updateSceneryMotion(time, dt);
   updateWind(dt);
@@ -2029,7 +2016,7 @@ function animate() {
     player.rotation.x = s.pitch;
     player.rotation.z = state.visualSteer * 0.12 + state.xVel * 0.006;
   }
-  player.visible = state.invincibleT <= 0 || Math.floor(t * 20) % 2 === 0;
+  player.visible = state.invincibleT <= 0 || Math.floor(time * 20) % 2 === 0;
 
   // 坂の頂上（この先で急に落ちこむ場所）を見つけて、カメラを持ち上げる。
   // 一瞬だけ道の先が消えて、海だけが正面に広がる。
@@ -2115,15 +2102,10 @@ function endGame(cleared) {
   state.running = false;
   input.steer = 0;
   keys.clear();
-  state.bestLemons = Math.max(state.bestLemons, state.lemons);
   if (cleared) {
-    document.getElementById('clearLemons').textContent = state.lemons;
     document.getElementById('clearLap').textContent = state.lap;
-    document.getElementById('clearBest').textContent = state.bestLemons;
     showOverlay('clearScreen');
   } else {
-    document.getElementById('finalLemons').textContent = state.lemons;
-    document.getElementById('finalBest').textContent = state.bestLemons;
     showOverlay('gameOverScreen');
   }
 }
@@ -2131,7 +2113,6 @@ function endGame(cleared) {
 // 何周でも同じ坂を走る。周をかさねると すこしだけ速くなる。
 function runLap(nextLap) {
   state.lap = nextLap;
-  state.lemons = 0;
   state.speedScale = 1 + Math.min(0.45, (nextLap - 1) * 0.08);
   startLevel(1);
   state.running = true;

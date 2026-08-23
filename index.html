@@ -31,7 +31,6 @@
 <div id="canvasWrap"></div>
 <div id="speedVignette" aria-hidden="true"></div>
 <div id="impactFlash" aria-hidden="true"></div>
-<div id="pickupFlash" aria-hidden="true"></div>
 
 <div id="hud">
   <div id="progressBox">
@@ -39,27 +38,24 @@
     <span id="progressLabel">レベル 1</span>
     <span id="progressFlag">🏁</span>
   </div>
-  <div id="lemonBox"><span class="icon">🍋</span><span id="lemonCount">0</span></div>
 </div>
 <div id="livesBox"></div>
 
 <div id="startScreen" class="overlay">
   <h1>豊島ダウンヒル</h1>
-  <p>瀬戸内海へ下る坂道を、スケボーでかけぬけよう。<br>← → キー、またはがめんの左右タップで うごく。<br>レモンをあつめて、フェリーの見える港をめざそう。</p>
+  <p>瀬戸内海へ下る坂道を、スケボーでかけぬけよう。<br>← → キー、またはがめんの左右タップで うごく。<br>障害物をよけて、フェリーの見える港をめざそう。</p>
   <button id="startBtn">🛹 タップしてスタート</button>
 </div>
 
 <div id="gameOverScreen" class="overlay hidden">
   <h1>ゲームオーバー</h1>
-  <div class="bigScore">🍋 <span id="finalLemons">0</span></div>
-  <p class="subScore">これまでの さいこう記録 🍋 <span id="finalBest">0</span></p>
+  <p>海風の坂道に、もう一度ちょうせんしよう。</p>
   <button id="retryBtn">もう一度はしる</button>
 </div>
 
 <div id="clearScreen" class="overlay hidden">
   <h1>ゴール！港に着いたよ 🚢</h1>
-  <div class="bigScore">🍋 <span id="clearLemons">0</span></div>
-  <p class="subScore"><span id="clearLap">1</span> 周目クリア ／ さいこう記録 🍋 <span id="clearBest">0</span></p>
+  <p><span id="clearLap">1</span> 周目クリア！</p>
   <button id="nextBtn">もう一周はしる</button>
 </div>
 
@@ -83,7 +79,8 @@
   threeScript.src = 'https://unpkg.com/three@0.128.0/build/three.min.js';
   threeScript.onload = () => {
     const gameScript = document.createElement('script');
-    gameScript.src = 'game.js';
+    // 景色素材の更新時に古いゲームコードがブラウザキャッシュへ残らないようにする。
+    gameScript.src = 'game.js?v=20260823-5';
     document.body.appendChild(gameScript);
   };
   threeScript.onerror = () => {
@@ -95,4 +92,3 @@
 </script>
 </body>
 </html>
-
