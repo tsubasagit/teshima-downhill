@@ -28,6 +28,9 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   #progressLabel { position: relative; z-index: 1; margin-left: 14px; color: #fff; font-weight: bold; font-size: 15px; text-shadow: 0 1px 2px rgba(0,0,0,0.4); }
   #progressFlag { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 16px; z-index: 1; }
   #livesBox { position: fixed; top: 58px; left: 16px; z-index: 10; display: flex; gap: 4px; font-size: 20px; pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+  /* #hud は pointer-events: none なので、押せるボタンだけ auto に戻す */
+  #soundBtn { flex: 0 0 auto; width: 34px; height: 34px; padding: 0; border: none; border-radius: 17px; background: rgba(4,52,44,0.55); color: #fff; font-size: 17px; line-height: 1; cursor: pointer; pointer-events: auto; }
+  #soundBtn:active { transform: scale(0.94); }
 
   /* ---- Overlays ---- */
   .overlay { position: fixed; inset: 0; background: rgba(4,52,44,0.72); backdrop-filter: blur(3px); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: #fff; text-align: center; z-index: 20; }
@@ -37,6 +40,9 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   .overlay button { font-size: 17px; font-weight: bold; padding: 12px 30px; border-radius: 999px; border: none; background: #f2c027; color: #412402; cursor: pointer; pointer-events: auto; }
   .overlay .launchLink { display: inline-block; font-size: 16px; font-weight: bold; padding: 12px 24px; border-radius: 999px; background: #f2c027; color: #412402; text-decoration: none; pointer-events: auto; }
   .overlay button:active { transform: scale(0.97); }
+  .overlay button:disabled { background: #6d7f78; color: #d8e6e1; cursor: default; }
+  .overlay button:disabled:active { transform: none; }
+  .overlay .hint { font-size: 12px; color: #9fc0b6; }
   .overlay .launchLink:active { transform: scale(0.97); }
   .overlay code { padding: 2px 6px; border-radius: 5px; background: rgba(255,255,255,0.16); color: #fff; }
   .bigScore { font-size: 22px; font-weight: bold; }

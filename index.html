@@ -38,6 +38,7 @@
     <span id="progressLabel">レベル 1</span>
     <span id="progressFlag">🏁</span>
   </div>
+  <button id="soundBtn" type="button" aria-label="音を消す">🔊</button>
 </div>
 <div id="livesBox"></div>
 
@@ -45,6 +46,7 @@
   <h1>豊島ダウンヒル</h1>
   <p>瀬戸内海へ下る坂道を、スケボーでかけぬけよう。<br>← → キー、またはがめんの左右タップで うごく。<br>障害物をよけて、フェリーの見える港をめざそう。</p>
   <button id="startBtn">🛹 タップしてスタート</button>
+  <p class="hint">はじめの1回だけ、けしきの絵をよみこみます。</p>
 </div>
 
 <div id="gameOverScreen" class="overlay hidden">
@@ -80,7 +82,7 @@
   threeScript.onload = () => {
     const gameScript = document.createElement('script');
     // 景色素材の更新時に古いゲームコードがブラウザキャッシュへ残らないようにする。
-    gameScript.src = 'game.js?v=20260823-7';
+    gameScript.src = 'game.js?v=20260823-14';
     document.body.appendChild(gameScript);
   };
   threeScript.onerror = () => {

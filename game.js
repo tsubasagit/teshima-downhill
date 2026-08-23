@@ -103,7 +103,16 @@ const scene = new THREE.Scene();
    画像がなくても動く。ある場合だけ、単色のかわりに絵を貼る                */
 const loader = new THREE.TextureLoader();
 const TEX = {};
+// よみこみ中の画像の枚数。ぜんぶそろうまでスタートを待たせる。
+// 走っている最中に画像がとどくと、世界を組みなおすことになるため。
+let texPending = 0;
+let onAllTexturesReady = null;
+function texArrived() {
+  texPending = Math.max(0, texPending - 1);
+  if (texPending === 0 && onAllTexturesReady) onAllTexturesReady();
+}
 function loadTex(key, file, repeat, fallbackFile) {
+  texPending++;
   loader.load(
     'assets/' + file,
     tex => {
@@ -117,11 +126,14 @@ function loadTex(key, file, repeat, fallbackFile) {
       }
       TEX[key] = tex;
       if (typeof onTextureReady === 'function') onTextureReady(key, tex);
+      texArrived();
     },
     undefined,
     () => {
       // 新しい幻想素材が見つからない場合も、元の素材でゲームを続ける。
+      // 代わりのよみこみを始めた「あと」で数を減らす（とちゅうで0にしないため）。
       if (fallbackFile) loadTex(key, fallbackFile, repeat);
+      texArrived();
     }
   );
 }
@@ -140,8 +152,10 @@ function makeSkyTexture() {
   return new THREE.CanvasTexture(c);
 }
 scene.background = makeSkyTexture();
-// 遠景が白く抜けないよう、パノラマの海色へなじむ青い空気遠近にする。
-scene.fog = new THREE.Fog(0x74c9df, 260, 2200);
+// 霧の色は「空パノラマの水平線の色」とそろえること（実測 #5cb9f9）。
+// ずれていると、海の遠くだけが霧色にとけた帯になり、空との境に線が出る。
+// 遠さも 2200 では海がすぐ平板になるので、3200 まで伸ばして模様を残す。
+scene.fog = new THREE.Fog(0x5cb9f9, 300, 3200);
 
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 4000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -227,7 +241,7 @@ function buildPath(course) {
 
   // 実際に道をすすめながら、位置と坂のきつさを記録する
   let heading = 0, x = 0, z = 0, y = 0, travelled = 0;
-  const points = [{ x, y, z, heading, grade: eased[0] }];
+  const points = [{ x, y, z, heading, grade: eased[0], courseGrade: eased[0] }];
   for (let i = 0; i < steps.length; i++) {
     const slopePhase = (travelled % CONFIG.slopeWaveLength) / CONFIG.slopeWaveLength;
     const fullGrade = eased[i] + CONFIG.slopeWave * Math.pow(Math.sin(Math.PI * slopePhase), 2);
@@ -236,12 +250,16 @@ function buildPath(course) {
     const remaining = Math.max(0, courseLength - travelled);
     const finishT = THREE.MathUtils.smoothstep(Math.min(1, remaining / CONFIG.finishFlattenLength), 0, 1);
     grade = THREE.MathUtils.lerp(CONFIG.finishSlopeRate, grade, finishT);
+    // COURSE に書いた勾配だけを取り出したもの（うねりを足す前）。
+    // 「頂上で道が消える」演出は、うねりではなく COURSE の変わり目で出したい。
+    let courseGrade = THREE.MathUtils.lerp(CONFIG.startSlopeRate, eased[i], rampT);
+    courseGrade = THREE.MathUtils.lerp(CONFIG.finishSlopeRate, courseGrade, finishT);
     heading += steps[i].dHeading;
     x += Math.sin(heading) * DL;
     z -= Math.cos(heading) * DL;
     y -= grade * DL;
     travelled += DL;
-    points.push({ x, y, z, heading, grade });
+    points.push({ x, y, z, heading, grade, courseGrade });
   }
   return points;
 }
@@ -259,9 +277,10 @@ function sampleAt(path, dist) {
   const z = THREE.MathUtils.lerp(p0.z, p1.z, t);
   const heading = THREE.MathUtils.lerp(p0.heading, p1.heading, t);
   const grade = THREE.MathUtils.lerp(p0.grade, p1.grade, t);
+  const courseGrade = THREE.MathUtils.lerp(p0.courseGrade, p1.courseGrade, t);
   const right = new THREE.Vector3(Math.cos(heading), 0, Math.sin(heading));
   const forward = new THREE.Vector3(Math.sin(heading), 0, -Math.cos(heading));
-  return { pos: new THREE.Vector3(x, y, z), right, forward, heading, grade, pitch: Math.atan(grade) };
+  return { pos: new THREE.Vector3(x, y, z), right, forward, heading, grade, courseGrade, pitch: Math.atan(grade) };
 }
 
 
@@ -401,6 +420,8 @@ function applyPendingRebuilds() {
     'villageHouseB', 'meadowBankA', 'meadowBankB',
   ];
   if (sceneryKeys.some(key => pendingRebuild[key])) {
+    // よみこみ中は何度も組みなおさない。ぜんぶ届いてから1回にまとめる。
+    if (texPending > 0 && !state.running) return;
     for (const key of sceneryKeys) pendingRebuild[key] = false;
     if (state.path) rebuildLevel();
   }
@@ -480,19 +501,27 @@ function groundWave(d, seed = 0) {
 
 // 横方向にも高さを変える帯。道路脇の土手を水平な板ではなく斜面にする。
 // wave を true にすると、外側のふちだけ うねる。
-function buildSlopedRibbon(path, offsetLeft, offsetRight, material, yLeft, yRight, uvRepeat = 0, wave = 0) {
+// taper は「外がわのふちを どれだけ立ち上げるか」を距離から返す関数（0〜1）。
+// 港では山を寝かせて海を見せたいので、そこだけ 0 に近づける。
+function buildSlopedRibbon(path, offsetLeft, offsetRight, material, yLeft, yRight, uvRepeat = 0, wave = 0, taper = null) {
   const verts = [];
   const uvs = [];
   for (let i = 0; i < path.length - 1; i++) {
     const a = sampleAt(path, i * DL);
     const b = sampleAt(path, (i + 1) * DL);
     const da = i * DL, db = (i + 1) * DL;
+    const tA = taper ? taper(da) : 1;
+    const tB = taper ? taper(db) : 1;
+    const offA = THREE.MathUtils.lerp(offsetRight, offsetLeft, tA);
+    const offB = THREE.MathUtils.lerp(offsetRight, offsetLeft, tB);
+    const yOutA = THREE.MathUtils.lerp(yRight, yLeft, tA);
+    const yOutB = THREE.MathUtils.lerp(yRight, yLeft, tB);
     // うねりは「道から遠いほう」のふちにだけ足す
-    const waveOuterA = wave ? groundWave(da, offsetLeft) * wave : 0;
-    const waveOuterB = wave ? groundWave(db, offsetLeft) * wave : 0;
-    const aL = a.pos.clone().addScaledVector(a.right, offsetLeft); aL.y += yLeft + waveOuterA;
+    const waveOuterA = wave ? groundWave(da, offsetLeft) * wave * tA : 0;
+    const waveOuterB = wave ? groundWave(db, offsetLeft) * wave * tB : 0;
+    const aL = a.pos.clone().addScaledVector(a.right, offA); aL.y += yOutA + waveOuterA;
     const aR = a.pos.clone().addScaledVector(a.right, offsetRight); aR.y += yRight;
-    const bL = b.pos.clone().addScaledVector(b.right, offsetLeft); bL.y += yLeft + waveOuterB;
+    const bL = b.pos.clone().addScaledVector(b.right, offB); bL.y += yOutB + waveOuterB;
     const bR = b.pos.clone().addScaledVector(b.right, offsetRight); bR.y += yRight;
     verts.push(aL.x, aL.y, aL.z, aR.x, aR.y, aR.z, bL.x, bL.y, bL.z);
     verts.push(bL.x, bL.y, bL.z, aR.x, aR.y, aR.z, bR.x, bR.y, bR.z);
@@ -541,6 +570,8 @@ function makeCloudCluster(rng, tall = false) {
     const g = new THREE.Group();
     const mat = new THREE.MeshBasicMaterial({ map: TEX.cloud, transparent: true, depthWrite: false, fog: false });
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, tall ? 2.4 : 1.6), mat);
+    // 同じ絵の使いまわしなので、半分は左右反転して並びの繰り返しを目立たなくする
+    if (rng() < 0.5) plane.scale.x = -1;
     g.add(plane);
     g.userData.billboard = true;
     g.userData.sky = true;   // 空にうかぶ板だけは、カメラのかたむきごと向く
@@ -1110,6 +1141,29 @@ function buildScenery(path, totalLength) {
   worldGroup.add(buildWall(path, roadHalf + 5.2, 1.15, stoneMatR, -0.05, totalLength));
   worldGroup.add(buildSlopedRibbon(path, roadHalf + 17, roadHalf + 5.2, grassMidMat, 2.3, 1.02, totalLength, 0.6));
   worldGroup.add(buildSlopedRibbon(path, roadHalf + 45, roadHalf + 17, grassFarMat, 4.8, 2.3, totalLength, 1.15));
+  /* 右カーブの「内がわ」では、曲がりの半径より外に点を置くと帯が八の字に裏返る。
+     このコースの右カーブは いちばんきつい所で半径 137 しかないので、
+     その地点で安全に出せる右側の距離を返す関数をつくっておく。            */
+  const rightRoom = d => {
+    const h0 = sampleAt(path, Math.max(0, d - 20)).heading;
+    const h1 = sampleAt(path, Math.min(totalLength, d + 20)).heading;
+    const turn = h1 - h0;              // 右カーブでプラス
+    if (turn < 0.002) return 1e6;      // まっすぐ・左カーブなら制限なし
+    return (40 / turn) * 0.55;         // 曲がりの半径の 55% までにとどめる
+  };
+
+  // 右手は島の内陸。ここで帯を切ると その先がぜんぶ海になり、
+  // 「海にうかぶ細長い土手」を走っているように見えてしまう。山の裾までつなぐ。
+  // 港では海を主役にしたいので最後の 260 ユニットで寝かせ、
+  // 右カーブでは裏返らない範囲まで自動で引っこめる。
+  /* 幅を場所ごとに変えると、せまくなった先端がクサビになって海の上に突き出る。
+     そこで「どこでも折れない幅」に固定する。
+     いちばんきつい右カーブの半径が 137 なので、その半分あたりの 70 までにする。
+     高さを変えるだけの taper（港で寝かせる）なら、先端はできない。          */
+  const inlandInner = roadHalf + 45;
+  const inlandOuter = roadHalf + 70;
+  const inlandTaper = d => THREE.MathUtils.smoothstep(Math.min(1, (totalLength - d) / 260), 0, 1);
+  worldGroup.add(buildSlopedRibbon(path, inlandOuter, inlandInner, grassFarMat, 14, 4.8, totalLength, 2.4, inlandTaper));
 
   // 電柱と電線を右側にとおす。日本の田舎道らしさは これが効く。
   let prevPole = null;
@@ -1353,13 +1407,18 @@ function buildScenery(path, totalLength) {
   addHarborSprite(TEX.harborShelter, 14.5, 8.5, totalLength - 31, -12.4, 0.05);
   addHarborSprite(TEX.harborMirror, 4.1, 6.4, totalLength - 11, 6.8, 0.05);
   if (TEX.harborSeawall) {
-    const wall = makeSceneryPlane(TEX.harborSeawall, 39, 7.8, 2.55);
-    const wallP = end.pos.clone().addScaledVector(end.forward, 8);
+    // 岸壁のふちに合わせて置く。奥へ離すと、板の下に海がのぞいて宙に浮く。
+    // 高さは目の高さ（3.45）より低くすること。高いと ゴールで海がぜんぶ隠れて、
+    // せっかくの港とフェリーが1つも見えなくなる。
+    const wall = makeSceneryPlane(TEX.harborSeawall, 46, 5.2, 1.9);
+    const wallP = end.pos.clone().addScaledVector(end.forward, 3.5);
     wall.position.x += wallP.x;
-    wall.position.y += wallP.y - 0.15;
+    wall.position.y += wallP.y - 1.5;
     wall.position.z += wallP.z;
+    // 防波壁は「岸にそった構造物」なので、カメラを向かせてはいけない。
+    // 向かせると 58 ユニットの板がどこを見ても正面に立ちはだかり、フェリーを隠す。
+    wall.rotation.y = -end.heading;
     worldGroup.add(wall);
-    billboards.push(wall);
   }
 
   // 海は防波壁の向こうから始まる長方形に変更。円形の海が道路の下へ回り込むのを防ぐ。
@@ -1380,9 +1439,12 @@ function buildScenery(path, totalLength) {
   worldGroup.add(seaGroup);
 
   // 港のフェリーと小舟は防波壁より沖に配置する。
+  // ゴールの主役。小さく遠いと点にしか見えないので、大きくして近くへ寄せる。
   const ferry = makeFerry();
-  const ferryP = end.pos.clone().addScaledVector(end.forward, 130).addScaledVector(end.right, -42);
-  ferry.position.set(ferryP.x, seaY + 0.2, ferryP.z);
+  ferry.scale.setScalar(2.8);
+  const ferryP = end.pos.clone().addScaledVector(end.forward, 80).addScaledVector(end.right, -34);
+  ferry.position.set(ferryP.x, seaY + 0.4, ferryP.z);
+  ferry.rotation.y = -end.heading + 0.3;
   worldGroup.add(ferry);
   rememberMotion(ferry, 'boats', 0.4);
   for (let i = 0; i < 3; i++) {
@@ -1448,17 +1510,23 @@ function buildScenery(path, totalLength) {
     new THREE.MeshPhongMaterial({ color: 0x5f8d55, flatShading: true, shininess: 2 }),
     new THREE.MeshPhongMaterial({ color: 0x86a882, flatShading: true, shininess: 2 }),
   ];
-  for (let d = 60; d < totalLength; d += 120) {
+  // 港の手前 300 ユニットには置かない（内陸の斜面を寝かせて海を見せる区間）
+  for (let d = 60; d < totalLength - 300; d += 110) {
     const s = sampleAt(path, d);
+    const room = rightRoom(d);
     for (let k = 0; k < 2; k++) {
-      const r = 52 + rng() * 40;
+      const r = 62 + rng() * 46;
       // とがらせるほど「山」ではなく「三角の板」に見える。低くて丸い稜線にする。
       const hill = new THREE.Mesh(new THREE.ConeGeometry(r, r * (0.32 + rng() * 0.16), 7), mountainMats[k]);
-      // 山のふもとが道路へせり出さないよう、半径のぶんだけ必ず右へ逃がす
-      const offset = roadHalf + 46 + r + k * 58 + rng() * 30;
+      // 内陸の斜面の外がわに置き、その裾から山が続いて見えるようにする
+      const offset = roadHalf + 78 + r * 0.45 + k * 46 + rng() * 22;
+      // 曲がりの内がわへ はみ出す山と、内陸の斜面が寝ている所の山は置かない
+      // （どちらも「海の上に山が浮いている」ように見えてしまう）
+      if (offset > room || inlandTaper(d) < 0.75) continue;
       const hp = s.pos.clone().addScaledVector(s.right, offset);
-      // 深めに沈めて、ふもとを道ばたの草むらの後ろへ隠す
-      hill.position.set(hp.x, s.pos.y - 11 + k * 5, hp.z);
+      // ふもとは内陸の斜面（高さ14）のうしろに隠し、いただきだけを出す。
+      // 持ち上げすぎると海の上に浮き、沈めすぎると まったく見えなくなる。
+      hill.position.set(hp.x, s.pos.y + 2 + k * 6, hp.z);
       worldGroup.add(hill);
     }
   }
@@ -1468,10 +1536,11 @@ function buildScenery(path, totalLength) {
     const s = sampleAt(path, rng() * totalLength);
     const cloud = makeCloudCluster(rng);
     const side = rng() < 0.5 ? -1 : 1;
-    const p = s.pos.clone().addScaledVector(s.right, side * (140 + rng() * 240));
+    // 近すぎる雲は、ただの白い四角に見える。遠くへ置いて そのぶん大きくする。
+    const p = s.pos.clone().addScaledVector(s.right, side * (280 + rng() * 360));
     // 坂の標高と一緒に雲まで下げない。海面上の白い塊に見えない高さへ固定する。
-    cloud.position.set(p.x, s.pos.y + 145 + rng() * 65, p.z);
-    cloud.scale.setScalar(7 + rng() * 11);
+    cloud.position.set(p.x, s.pos.y + 180 + rng() * 90, p.z);
+    cloud.scale.setScalar(12 + rng() * 15);
     worldGroup.add(cloud);
     if (cloud.userData.billboard) billboards.push(cloud);
     rememberMotion(cloud, 'clouds', rng() * Math.PI * 2);
@@ -1479,9 +1548,9 @@ function buildScenery(path, totalLength) {
 
   // ゴールの先にそびえる入道雲
   const bigCloud = makeCloudCluster(rng, true);
-  const bp = coast.clone().addScaledVector(end.forward, 240);
-  bigCloud.position.set(bp.x, end.pos.y + 165, bp.z);
-  bigCloud.scale.setScalar(28);
+  const bp = coast.clone().addScaledVector(end.forward, 460);
+  bigCloud.position.set(bp.x, end.pos.y + 240, bp.z);
+  bigCloud.scale.setScalar(48);
   worldGroup.add(bigCloud);
   if (bigCloud.userData.billboard) billboards.push(bigCloud);
   rememberMotion(bigCloud, 'clouds', 1.2);
@@ -1647,6 +1716,9 @@ function makePictureObstacle(texture, width, height, halfWidth, type) {
   g.add(picture);
   g.userData.halfWidth = halfWidth;
   g.userData.type = type;
+  // 一枚絵なので、道の向きに固定するとカーブで斜めから見て うすくなる。
+  // カメラのほうを向かせつつ、坂のかたむき（roadPitch）だけは残す。
+  g.userData.billboard = true;
   return g;
 }
 
@@ -1747,6 +1819,10 @@ function spawnItems(path, totalLength, level) {
       group.rotation.x = s.pitch;
       group.userData.dist = d;
       group.userData.laneX = lane * CONFIG.laneSpacing;
+      if (group.userData.billboard) {
+        group.userData.roadPitch = s.pitch;
+        billboards.push(group);
+      }
       worldGroup.add(group);
       items.push(group);
     }
@@ -1779,19 +1855,11 @@ const state = {
 
 let player = buildPlayer();
 
-// 画像がとどいたあと、いまのレベルを組み立てなおす（進行状況はそのまま）
-function rebuildLevel() {
-  const keepDistance = state.distance;
-  const keepLives = state.lives;
-  const wasRunning = state.running;
-  startLevel(state.level);
-  state.distance = keepDistance;
-  state.lives = keepLives;
-  state.running = wasRunning;
-  renderLives();
-}
+/* 世界づくり（重い・0.2秒ちかくかかる）と、走行状態のもどし（軽い）を分ける。
+   同じ坂を何周でも走るので、2周目からは世界を作りなおさなくてよい。       */
+let worldBuilt = false;
 
-function startLevel(level) {
+function buildWorld() {
   clearWorld();
   state.items = [];
   billboards = [];
@@ -1803,8 +1871,11 @@ function startLevel(level) {
   state.path = buildPath(course);
   state.totalLength = (state.path.length - 1) * DL;
   buildScenery(state.path, state.totalLength);
-  state.items = spawnItems(state.path, state.totalLength, level);
+  state.items = spawnItems(state.path, state.totalLength, 1);
+  worldBuilt = true;
+}
 
+function resetRun() {
   state.level = 1;
   state.distance = 0;
   state.xOffset = 0;
@@ -1826,9 +1897,44 @@ function startLevel(level) {
   camera.lookAt(startLook);
   camera.fov = 62;
   camera.updateProjectionMatrix();
+  skyDome.position.copy(camera.position);
 
   document.getElementById('progressLabel').textContent = state.lap > 1 ? `${state.lap} 周目` : '港へ';
   renderLives();
+  updateHUD();
+}
+
+function startLevel(level) {
+  buildWorld();
+  resetRun();
+}
+
+/* 画像がとどいたあと、世界を組みなおす。
+   走っている最中に呼ばれることがあるので、乗り手とカメラの状態は
+   ひとつ残らず持ちこすこと。ひとつでも取りこぼすと、走行中に
+   スタート地点へワープしたように見える。                              */
+function rebuildLevel() {
+  const keep = {
+    distance: state.distance, lives: state.lives, running: state.running,
+    xOffset: state.xOffset, xVel: state.xVel, visualSteer: state.visualSteer,
+    cameraBank: state.cameraBank, crest: state.crest, invincibleT: state.invincibleT,
+    impactFlash: state.impactFlash, cameraShakeT: state.cameraShakeT,
+    lap: state.lap, speedScale: state.speedScale,
+  };
+  const camPos = camera.position.clone();
+  const camQuat = camera.quaternion.clone();
+  const camFov = camera.fov;
+
+  buildWorld();
+  Object.assign(state, keep);
+
+  camera.position.copy(camPos);
+  camera.quaternion.copy(camQuat);
+  camera.fov = camFov;
+  camera.updateProjectionMatrix();
+  skyDome.position.copy(camera.position);
+  renderLives();
+  updateHUD();
 }
 
 
@@ -1867,12 +1973,130 @@ function checkCollisions() {
       state.impactFlash = 1;
       state.xVel += dx < 0 ? 6 : -6;
       createBurst(item.position.clone().add(new THREE.Vector3(0, 0.8, 0)), 0xff5a46, 24);
+      playThud();
       renderLives();
       if (state.lives <= 0) {
         endGame(false);
       }
     }
   }
+}
+
+
+/* ------------------------- 音（ファイルなしで その場で合成） -------------------------
+   風・車輪・衝突・ゴールの4つだけ。画像とちがい 音は Web Audio でつくれるので、
+   よみこみを1バイトも増やさずに鳴らせる。
+   スマホは「最初のタップより前」に音を出せない決まりなので、
+   スタートボタンから startSound() で目をさまさせる。                              */
+const sound = { ctx: null, on: true, master: null, windGain: null, windFilter: null, rollGain: null };
+try { sound.on = localStorage.getItem('teshima-sound') !== '0'; } catch (e) { /* 使えなくても平気 */ }
+
+function makeNoiseBuffer(ctx, seconds = 2) {
+  const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < data.length; i++) {
+    // まっさらな雑音より、低い音を強めにしたほうが「風」に聞こえる
+    const white = Math.random() * 2 - 1;
+    last = (last + 0.02 * white) / 1.02;
+    data[i] = last * 3.5;
+  }
+  return buf;
+}
+
+function startSound() {
+  if (sound.ctx) {
+    if (sound.ctx.state === 'suspended') sound.ctx.resume();
+    return;
+  }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  const ctx = new Ctx();
+  sound.ctx = ctx;
+  const noise = makeNoiseBuffer(ctx);
+
+  sound.master = ctx.createGain();
+  sound.master.gain.value = sound.on ? 0.9 : 0;
+  sound.master.connect(ctx.destination);
+
+  // 風＝帯域をしぼった雑音。速さで音の高さと大きさを変える。
+  const windSrc = ctx.createBufferSource();
+  windSrc.buffer = noise;
+  windSrc.loop = true;
+  sound.windFilter = ctx.createBiquadFilter();
+  sound.windFilter.type = 'bandpass';
+  sound.windFilter.frequency.value = 620;
+  sound.windFilter.Q.value = 0.7;
+  sound.windGain = ctx.createGain();
+  sound.windGain.gain.value = 0;
+  windSrc.connect(sound.windFilter).connect(sound.windGain).connect(sound.master);
+  windSrc.start();
+
+  // 車輪＝低いところだけ残した雑音。アスファルトのゴロゴロ。
+  const rollSrc = ctx.createBufferSource();
+  rollSrc.buffer = noise;
+  rollSrc.loop = true;
+  const rollFilter = ctx.createBiquadFilter();
+  rollFilter.type = 'lowpass';
+  rollFilter.frequency.value = 250;
+  sound.rollGain = ctx.createGain();
+  sound.rollGain.gain.value = 0;
+  rollSrc.connect(rollFilter).connect(sound.rollGain).connect(sound.master);
+  rollSrc.start();
+}
+
+function updateSound(s) {
+  if (!sound.ctx || !sound.windGain) return;
+  const t = sound.ctx.currentTime;
+  // 坂がきついほど速く感じるので、勾配も音に混ぜる
+  const speedT = state.running ? THREE.MathUtils.clamp(0.45 + s.grade * 1.1, 0, 1.2) : 0;
+  sound.windGain.gain.setTargetAtTime(0.17 * speedT, t, 0.25);
+  sound.windFilter.frequency.setTargetAtTime(540 + 520 * speedT, t, 0.3);
+  sound.rollGain.gain.setTargetAtTime(0.3 * speedT, t, 0.2);
+}
+
+function playThud() {
+  if (!sound.ctx) return;
+  const ctx = sound.ctx, t = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(150, t);
+  osc.frequency.exponentialRampToValueAtTime(46, t + 0.22);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.55, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+  osc.connect(g).connect(sound.master);
+  osc.start(t);
+  osc.stop(t + 0.32);
+}
+
+function playChime() {
+  if (!sound.ctx) return;
+  const ctx = sound.ctx, t0 = ctx.currentTime;
+  [523.25, 659.25, 783.99, 1046.5].forEach((hz, i) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = hz;
+    const g = ctx.createGain();
+    const t = t0 + i * 0.11;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.2, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+    osc.connect(g).connect(sound.master);
+    osc.start(t);
+    osc.stop(t + 0.6);
+  });
+}
+
+function setSoundOn(on) {
+  sound.on = on;
+  if (sound.ctx && sound.master) sound.master.gain.setTargetAtTime(on ? 0.9 : 0, sound.ctx.currentTime, 0.05);
+  const btn = document.getElementById('soundBtn');
+  if (btn) {
+    btn.textContent = on ? '🔊' : '🔇';
+    btn.setAttribute('aria-label', on ? '音を消す' : '音を出す');
+  }
+  try { localStorage.setItem('teshima-sound', on ? '1' : '0'); } catch (e) { /* 使えなくても平気 */ }
 }
 
 
@@ -1982,7 +2206,11 @@ function animate() {
     if (b.userData.sky) {
       b.quaternion.copy(camera.quaternion);
     } else {
-      b.rotation.set(0, Math.atan2(camera.position.x - b.position.x, camera.position.z - b.position.z), 0);
+      b.rotation.order = 'YXZ';
+      b.rotation.y = Math.atan2(camera.position.x - b.position.x, camera.position.z - b.position.z);
+      // 路上の車などは、坂のかたむきに乗せたままカメラを向かせる
+      b.rotation.x = b.userData.roadPitch || 0;
+      b.rotation.z = 0;
     }
   }
 
@@ -2048,8 +2276,10 @@ function animate() {
 
   // 坂の頂上（この先で急に落ちこむ場所）を見つけて、カメラを持ち上げる。
   // 一瞬だけ道の先が消えて、海だけが正面に広がる。
-  const aheadGrade = sampleAt(state.path, state.distance + 14).grade;
-  const crestTarget = THREE.MathUtils.clamp((aheadGrade - s.grade) * 9, 0, 1);
+  // うねり（slopeWave）ではなく COURSE に書いた勾配の変わり目で出す。
+  // うねりで判定すると 230 ユニットごとに中途半端に発火して、意味が伝わらない。
+  const aheadCourse = sampleAt(state.path, state.distance + 40).courseGrade;
+  const crestTarget = THREE.MathUtils.clamp((aheadCourse - s.courseGrade) * 9, 0, 1);
   state.crest += (crestTarget - state.crest) * (1 - Math.exp(-dt * 4));
 
   // カメラ追従
@@ -2067,7 +2297,11 @@ function animate() {
   const lookAheadS = sampleAt(state.path, state.distance + CONFIG.cameraLookAhead + state.crest * CONFIG.crestLookAhead);
   const lookAhead = lookAheadS.pos.clone().addScaledVector(lookAheadS.right, state.xOffset * 0.3);
   // 道路より少し水平寄りを見ると、前方へ落ちていく坂の傾斜が伝わる。
-  lookAhead.y += CONFIG.cameraLookLift;
+  // 縦画面（スマホ）は そのままだと画面の6割が路面になるので、さらに上を見る。
+  const portraitLift = camera.aspect < 1
+    ? THREE.MathUtils.lerp(1, 1.75, THREE.MathUtils.clamp((1 - camera.aspect) / 0.45, 0, 1))
+    : 1;
+  lookAhead.y += CONFIG.cameraLookLift * portraitLift;
   camera.lookAt(lookAhead);
   const curveBank = THREE.MathUtils.clamp((lookAheadS.heading - s.heading) * 2.5, -1, 1);
   const targetBank = -state.visualSteer * CONFIG.cameraBank - curveBank * 0.025;
@@ -2079,6 +2313,11 @@ function animate() {
   camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-dt * 3.5));
   camera.updateProjectionMatrix();
 
+  // 空のドームはカメラについてこさせる。原点に置いたままだと、
+  // コースを 500 下ったころには 描かれた水平線が 17度も浮きあがってしまう。
+  skyDome.position.copy(camera.position);
+
+  updateSound(s);
   renderer.render(scene, camera);
 }
 
@@ -2131,6 +2370,7 @@ function endGame(cleared) {
   input.steer = 0;
   keys.clear();
   if (cleared) {
+    playChime();
     document.getElementById('clearLap').textContent = state.lap;
     showOverlay('clearScreen');
   } else {
@@ -2142,11 +2382,44 @@ function endGame(cleared) {
 function runLap(nextLap) {
   state.lap = nextLap;
   state.speedScale = 1 + Math.min(0.45, (nextLap - 1) * 0.08);
-  startLevel(1);
+  if (!worldBuilt) buildWorld();
+  resetRun();
+  startSound();
   state.running = true;
 }
 
-document.getElementById('startBtn').addEventListener('click', () => {
+/* スタートを待たせるしくみ。
+   画像がとどくと世界を組みなおすので、走っている最中に届くとつっかえる。
+   ぜんぶそろってから走りださせる（おそい回線でも12秒であきらめて始める）。 */
+const startBtn = document.getElementById('startBtn');
+let startReady = false;
+function markStartReady() {
+  if (startReady) return;
+  startReady = true;
+  applyPendingRebuilds();   // よみこんだ絵を反映してから、押せるようにする
+  startBtn.disabled = false;
+  startBtn.textContent = '🛹 タップしてスタート';
+}
+if (texPending === 0) {
+  markStartReady();
+} else {
+  startBtn.disabled = true;
+  startBtn.textContent = '⏳ けしきを よみこみ中…';
+  onAllTexturesReady = markStartReady;
+  setTimeout(markStartReady, 12000);
+}
+
+const soundBtn = document.getElementById('soundBtn');
+if (soundBtn) {
+  soundBtn.addEventListener('click', () => {
+    startSound();
+    setSoundOn(!sound.on);
+  });
+}
+setSoundOn(sound.on);
+
+startBtn.addEventListener('click', () => {
+  if (!startReady) return;
   runLap(1);
   document.getElementById('startScreen').classList.add('hidden');
 });
@@ -2160,7 +2433,8 @@ document.getElementById('nextBtn').addEventListener('click', () => {
 });
 
 // 起動直後は道だけ見せておく
-startLevel(1);
+buildWorld();
+resetRun();
 state.running = false;
 animate();
 
