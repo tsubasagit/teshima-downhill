@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>豊島ダウンヒルのしくみ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sky: #eaf6fb; --ink: #1d3446; --sub: #50677a;
+    --py: #2f6fb0; --py-bg: #e4eefa;
+    --js: #d99a00; --js-bg: #fff4d1;
+    --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #cfe3ec; overflow: hidden; }
+  body { display: grid; place-items: center; font-family: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", "Meiryo", sans-serif; color: var(--ink); }
+  .slide {
+    width: 1280px; height: 720px; flex: none;
+    background: linear-gradient(180deg, var(--sky) 0%, #f7fbfd 62%, #d8eef2 100%);
+    padding: 34px 56px 30px; display: flex; flex-direction: column; gap: 18px;
+    transform-origin: center; position: relative; overflow: hidden;
+  }
+  h1 { margin: 0; font-size: 44px; font-weight: 800; letter-spacing: .02em; }
+  h1 small { display: block; font-size: 22px; font-weight: 500; color: var(--sub); margin-top: 4px; }
+  .cols { display: grid; grid-template-columns: 1fr 1.45fr; gap: 28px; flex: 1; }
+  .card { background: var(--card); border-radius: 26px; padding: 20px 28px; display: flex; flex-direction: column; gap: 12px; }
+  .py { border: 5px solid var(--py); }
+  .js { border: 5px solid var(--js); }
+  .tag { display: inline-block; font-size: 22px; font-weight: 800; color: #fff; padding: 4px 16px; border-radius: 99px; align-self: flex-start; }
+  .py .tag { background: var(--py); }
+  .js .tag { background: var(--js); }
+  .role { margin: 0; font-size: 36px; font-weight: 800; }
+  .role .ic { font-size: 44px; margin-right: 6px; }
+  p { margin: 0; font-size: 25px; line-height: 1.55; }
+  .box { border-radius: 16px; padding: 14px 18px; font-size: 22px; line-height: 1.5; }
+  .py .box { background: var(--py-bg); }
+  .js .box { background: var(--js-bg); }
+  code { font-family: Consolas, "Meiryo", monospace; font-size: .92em; background: rgba(0,0,0,.06); padding: 1px 6px; border-radius: 6px; }
+  .loop { display: flex; align-items: center; gap: 10px; }
+  .step { flex: 1; background: var(--js-bg); border-radius: 18px; padding: 14px 10px; text-align: center; }
+  .step b { display: block; font-size: 40px; line-height: 1.1; }
+  .step span { display: block; font-size: 24px; font-weight: 800; margin-top: 4px; }
+  .step i { display: block; font-style: normal; font-size: 17px; color: var(--sub); margin-top: 2px; }
+  .arrow { font-size: 34px; color: var(--js); font-weight: 800; }
+  .again { text-align: center; font-size: 26px; font-weight: 800; color: #9a6c00; }
+  .formula { text-align: center; font-size: 25px; }
+  .formula strong { background: linear-gradient(transparent 55%, #ffd95e 55%); }
+  footer { font-size: 23px; text-align: center; font-weight: 800; }
+  footer span { display: block; color: var(--sub); font-weight: 500; font-size: 20px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="slide" id="slide">
+  <h1>🛹 豊島ダウンヒルは、どう動いているの？
+    <small>ゲームのうらでは、ふたりの「係」がはたらいています</small>
+  </h1>
+
+  <div class="cols">
+    <section class="card py">
+      <span class="tag">Python（パイソン）</span>
+      <h2 class="role"><span class="ic">📦</span>とどける係</h2>
+      <p>ゲームのファイルを、<br>ブラウザまで<b>運んでくる</b>。</p>
+      <div class="box"><code>start-game.cmd</code> を<br>ダブルクリックで スタート！</div>
+      <p style="font-size:22px;color:var(--sub)">とどけたら、あとは待つだけ。</p>
+    </section>
+
+    <section class="card js">
+      <span class="tag">JavaScript（ジャバスクリプト）</span>
+      <h2 class="role"><span class="ic">🎮</span>うごかす係</h2>
+      <div class="loop">
+        <div class="step"><b>👀</b><span>① 見る</span><i>キーや指</i></div>
+        <div class="arrow">→</div>
+        <div class="step"><b>🧮</b><span>② 計算</span><i>physics.js</i></div>
+        <div class="arrow">→</div>
+        <div class="step"><b>🎨</b><span>③ かく</span><i>game.js</i></div>
+      </div>
+      <div class="again">↻ 1秒に60回 くりかえす ＝ パラパラまんが！</div>
+      <div class="formula">計算のきほん： <strong>すすむ距離 ＝ 速さ × 時間</strong></div>
+    </section>
+  </div>
+
+  <footer>Python ＝ 本を運ぶ人　／　JavaScript ＝ パラパラまんがをめくる人
+    <span><code>settings.js</code> の数字を変えると、めくり方が変わるよ</span>
+  </footer>
+</div>
+<script>
+  // 画面の大きさに合わせて、スライドをまるごと拡大・縮小する
+  function fit() {
+    const s = Math.min(innerWidth / 1280, innerHeight / 720);
+    document.getElementById('slide').style.transform = 'scale(' + s + ')';
+  }
+  addEventListener('resize', fit); fit();
+</script>
+</body>
+</html>

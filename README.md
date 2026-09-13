@@ -50,6 +50,8 @@ three.js：3Dの景色を描く → 次のフレームへ
 
 基本は **進む距離 = 速さ × 経過した秒数**。36の速さで0.5秒進むと18ユニット進みます。発進時には目標の速さへ少しずつ近づけ、体とカメラの動きも滑らかにつなぎます。
 
+PythonとJavaScriptがそれぞれ何をしているかは、**[1枚スライド](https://tsubasagit.github.io/teshima-downhill/docs/how-it-works.html)**（[画像版](docs/images/how-it-works.png)）で小学生向けに説明しています。
+
 具体的な改造例、実験の順番、メンター向けの45〜60分の進行案は **[CoderDojo教材](docs/CODERDOJO.md)** にまとめています。
 
 ## 自分のパソコンで動かす
