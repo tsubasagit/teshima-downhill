@@ -86,8 +86,8 @@ function makeSkyTexture() {
   c.width = 2; c.height = 512;
   const ctx = c.getContext('2d');
   const grad = ctx.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0, '#1288ec');
-  grad.addColorStop(0.55, '#61c6ff');
+  grad.addColorStop(0, '#0465f5');
+  grad.addColorStop(0.55, '#39a9ff');
   grad.addColorStop(1, '#ddf7ff');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 2, 512);
@@ -294,6 +294,7 @@ scene.add(worldGroup);
 
 // つねにカメラを向く板（雲など）
 let billboards = [];
+let cloudSky = null; // 遠い雲は空と一緒に移動し、坂を下っても空の高さを保つ。
 
 /* 何周も走るゲームなので、コースを組みなおすたびに古い形と材質を捨てる。
    捨てないと、周回のたびにメモリが増えつづけて だんだん重くなる。
@@ -435,7 +436,7 @@ function applyPendingRebuilds() {
   }
 }
 
-// 空のドーム（画像がよみこめたら表示される）
+// 晴天の空のドーム。水平線は淡く、上空は鮮やかな夏の青にする。
 const skyDome = new THREE.Mesh(
   new THREE.SphereGeometry(1800, 32, 16),
   new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false,
@@ -444,8 +445,8 @@ const skyDome = new THREE.Mesh(
     fragmentShader: `varying vec3 skyDirection;
       void main() {
         vec3 direction = normalize(skyDirection);
-        float height = pow(max(direction.y,0.0),0.55);
-        vec3 color = mix(vec3(0.84,0.95,0.99),vec3(0.07,0.52,0.92),height);
+        float height = pow(smoothstep(0.0,0.45,max(direction.y,0.0)),0.48);
+        vec3 color = mix(vec3(0.84,0.95,0.99),vec3(0.015,0.38,0.96),height);
         float sun = pow(max(dot(direction,normalize(vec3(-0.55,0.48,-0.7))),0.0),240.0);
         float glow = pow(max(dot(direction,normalize(vec3(-0.55,0.48,-0.7))),0.0),12.0);
         color += vec3(0.22,0.20,0.12)*glow + vec3(0.38,0.34,0.22)*sun;
@@ -644,7 +645,7 @@ function makeCloudCluster(rng, tall = false) {
   // 画像があれば1枚絵の板（つねにカメラを向く）
   if (TEX.cloud) {
     const g = new THREE.Group();
-    const mat = softenSceneryEdges(new THREE.MeshBasicMaterial({ map: TEX.cloud, transparent: true, opacity: 0.82, depthWrite: false, fog: false }));
+    const mat = softenSceneryEdges(new THREE.MeshBasicMaterial({ map: TEX.cloud, transparent: true, opacity: 0.97, depthWrite: false, fog: false }));
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, tall ? 2.4 : 1.6), mat);
     // 同じ絵の使いまわしなので、半分は左右反転して並びの繰り返しを目立たなくする
     if (rng() < 0.5) plane.scale.x = -1;
@@ -1787,38 +1788,29 @@ function buildScenery(path, totalLength) {
     }
   }
 
-  // 雲（コースぞいの空にちらばせる）
-  for (let i = 0; i < 6; i++) {
-    const s = sampleAt(path, rng() * totalLength);
-    const cloud = makeCloudCluster(rng);
-    const side = rng() < 0.5 ? -1 : 1;
-    // 近すぎる雲は、ただの白い四角に見える。遠くへ置いて そのぶん大きくする。
-    const p = s.pos.clone().addScaledVector(s.right, side * (280 + rng() * 360));
-    // 坂の標高と一緒に雲まで下げない。海面上の白い塊に見えない高さへ固定する。
-    cloud.position.set(p.x, s.pos.y + 180 + rng() * 90, p.z);
-    cloud.scale.setScalar(24 + rng() * 24);
-    worldGroup.add(cloud);
+  // 遠い夏雲を全方位へ。カーブの向きや坂の標高によらず青空に雲が見える。
+  // 34枚の軽い画像を2段へずらし、青い余白と大きな白い雲を交互に並べる。
+  cloudSky = new THREE.Group();
+  cloudSky.position.copy(camera.position);
+  worldGroup.add(cloudSky);
+  const cloudRng = mulberry32(9132026);
+  for (let i = 0; i < 34; i++) {
+    const upper = i >= 20;
+    const count = upper ? 14 : 20;
+    const angle = ((upper ? i - 20 : i) + (upper ? 0.45 : 0)) / count * Math.PI * 2
+      + (cloudRng() - 0.5) * 0.13;
+    const elevation = upper ? 0.38 + cloudRng() * 0.2 : 0.15 + cloudRng() * 0.1;
+    const radius = 1250;
+    const tall = i % 5 === 0;
+    const cloud = makeCloudCluster(cloudRng, tall);
+    cloud.position.set(Math.sin(angle) * radius, radius * elevation, Math.cos(angle) * radius);
+    cloud.scale.setScalar((upper ? 115 : 95) + cloudRng() * 65);
+    cloud.scale.x *= tall ? 0.95 : 1.1 + cloudRng() * 0.65;
+    cloud.scale.y *= tall ? 1 : 0.6 + cloudRng() * 0.25;
+    cloudSky.add(cloud);
     if (cloud.userData.billboard) billboards.push(cloud);
-    rememberMotion(cloud, 'clouds', rng() * Math.PI * 2);
+    rememberMotion(cloud, 'clouds', cloudRng() * Math.PI * 2);
   }
-
-  // 出発地点から見える大きな夏雲。遠くに置き、道路の視界を空ける。
-  for (const [x,z,y,size] of [[-520,-1120,240,135],[580,-1450,310,170],[-1150,-1800,340,190]]) {
-    const cloud = makeCloudCluster(rng, true);
-    cloud.position.set(x,y,z); cloud.scale.setScalar(size);
-    worldGroup.add(cloud);
-    if (cloud.userData.billboard) billboards.push(cloud);
-    rememberMotion(cloud,'clouds',rng()*6.28);
-  }
-
-  // ゴールの先にそびえる入道雲
-  const bigCloud = makeCloudCluster(rng, true);
-  const bp = coast.clone().addScaledVector(end.forward, 460);
-  bigCloud.position.set(bp.x, end.pos.y + 240, bp.z);
-  bigCloud.scale.setScalar(48);
-  worldGroup.add(bigCloud);
-  if (bigCloud.userData.billboard) billboards.push(bigCloud);
-  rememberMotion(bigCloud, 'clouds', 1.2);
 
   // 港の景色を隠さない低いゴールマーカー。駐車場の白線で安全に停止する。
   const gs = sampleAt(path, totalLength - 5.5);
@@ -2261,6 +2253,7 @@ function resetRun() {
   camera.fov = 62;
   camera.updateProjectionMatrix();
   skyDome.position.copy(camera.position);
+  if (cloudSky) cloudSky.position.copy(camera.position);
 
   document.getElementById('progressLabel').textContent = state.lap > 1 ? `${state.lap} 周目` : '港へ';
   renderLives();
@@ -2296,6 +2289,7 @@ function rebuildLevel() {
   camera.fov = camFov;
   camera.updateProjectionMatrix();
   skyDome.position.copy(camera.position);
+  if (cloudSky) cloudSky.position.copy(camera.position);
   renderLives();
   updateHUD();
 }
@@ -2704,6 +2698,7 @@ function animate() {
   // 空のドームはカメラについてこさせる。原点に置いたままだと、
   // コースを 500 下ったころには 描かれた水平線が 17度も浮きあがってしまう。
   skyDome.position.copy(camera.position);
+  if (cloudSky) cloudSky.position.copy(camera.position);
 
   if (player.userData.spriteMode) {
     player.quaternion.copy(camera.quaternion);
