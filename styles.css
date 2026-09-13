@@ -27,7 +27,6 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   #progressFill { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; background: #1D9E75; border-radius: 15px; transition: width 0.15s linear; }
   #progressLabel { position: relative; z-index: 1; margin-left: 14px; color: #fff; font-weight: bold; font-size: 15px; text-shadow: 0 1px 2px rgba(0,0,0,0.4); }
   #progressFlag { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 16px; z-index: 1; }
-  #livesBox { position: fixed; top: 58px; left: 16px; z-index: 10; display: flex; gap: 4px; font-size: 20px; pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,0.5); }
   /* #hud は pointer-events: none なので、押せるボタンだけ auto に戻す */
   #soundBtn { flex: 0 0 auto; width: 34px; height: 34px; padding: 0; border: none; border-radius: 17px; background: rgba(4,52,44,0.55); color: #fff; font-size: 17px; line-height: 1; cursor: pointer; pointer-events: auto; }
   #soundBtn:active { transform: scale(0.94); }
@@ -51,10 +50,81 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 @media (max-width: 560px) {
   #hud { padding: 10px; gap: 8px; }
   #progressBox { height: 28px; }
-  #livesBox { top: 50px; left: 10px; }
   .overlay { padding: 24px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   #speedVignette { display: none; }
 }
+
+/* 海を広く見せる、余白のある案内画面と親指の操作パネル */
+:root { color-scheme: light; --ink: #123d49; --glass: rgba(12,50,65,.68); }
+.eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; }
+#hud { padding: max(16px, env(safe-area-inset-top)) 20px 12px; }
+#progressBox { height: 7px; max-width: 260px; background: rgba(255,255,255,.35); overflow: visible; margin-right: auto; }
+#progressFill { background: #f8e5a4; height: 7px; }
+#progressLabel { position: absolute; top: 17px; margin-left: 0; font-size: 11px; letter-spacing: .12em; }
+#progressFlag { display: none; }
+#labBtn, #pauseBtn, #soundBtn { pointer-events: auto; border: 1px solid rgba(255,255,255,.3); background: var(--glass); color: white; border-radius: 24px; height: 42px; cursor: pointer; backdrop-filter: blur(12px); }
+#labBtn { padding: 0 17px; font-size: 12px; font-weight: bold; }
+#pauseBtn, #soundBtn { width: 42px; flex: 0 0 42px; }
+#rideInfo { position: fixed; bottom: max(32px, env(safe-area-inset-bottom)); left: 28px; z-index: 9; color: #fff; display: flex; flex-direction: column; gap: 7px; text-shadow: 0 2px 10px #123d49; pointer-events: none; }
+#rideInfo strong { font-size: 46px; font-weight: 400; font-variant-numeric: tabular-nums; }
+#rideInfo small { font-size: 10px; letter-spacing: .08em; }
+#rideInfo .distance { font-size: 12px; }
+#rideControls { position: fixed; bottom: max(26px, env(safe-area-inset-bottom)); right: 24px; z-index: 10; display: flex; gap: 10px; }
+#rideControls button { width: 62px; height: 62px; border-radius: 50%; border: 1px solid rgba(255,255,255,.5); background: var(--glass); backdrop-filter: blur(8px); color: white; font-size: 27px; touch-action: none; cursor: pointer; }
+#rideControls [data-control="brake"] { width: 80px; border-radius: 24px; font-size: 11px; }
+#rideControls span { display: block; font-size: 9px; opacity: .65; margin-top: 5px; }
+#rideControls .pressed { background: #f2df9b; color: var(--ink); transform: scale(.94); }
+.overlay { background: linear-gradient(90deg, rgba(7,40,55,.75), rgba(11,51,69,.30) 70%, rgba(11,51,69,.12)); backdrop-filter: none; padding: 36px; }
+#startScreen { align-items: flex-start; text-align: left; padding-left: clamp(32px, 8vw, 140px); }
+#startScreen h1 { font-size: clamp(34px, 4.7vw, 68px); font-weight: 600; letter-spacing: -.04em; line-height: 1.25; }
+#startScreen .gameTitle { font-size: 16px; letter-spacing: .22em; margin-bottom: 18px; }
+#startScreen p { max-width: 540px; font-size: 13px; line-height: 2; }
+.overlay button { padding: 16px 30px; background: #f5df9b; color: #17424c; }
+#startBtn { margin-top: 14px; }
+.overlay .hint { color: #d3e4e7; }
+.lessonLink { font-size: 11px; color: #e4f0ed; text-underline-offset: 5px; margin-top: 12px; }
+button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid #eac960; outline-offset: 5px; }
+#labPanel { position: fixed; inset: 0; z-index: 40; background: rgba(8,34,47,.62); backdrop-filter: blur(12px); display: grid; place-items: center; padding: 20px; overflow: auto; }
+.labCard { width: min(100%, 490px); padding: 30px; border-radius: 22px; color: var(--ink); background: #f6f7ef; box-shadow: 0 24px 100px #08273570; max-height: 100%; overflow: auto; }
+.labHeading, .labActions { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.labHeading button { border: none; background: none; color: #395e65; font-size: 12px; cursor: pointer; }
+.labCard h2 { font-size: 23px; line-height: 1.4; margin: 22px 0 10px; }
+.labCard p { font-size: 12px; line-height: 1.8; color: #526b70; }
+.labCard label { display: flex; justify-content: space-between; margin-top: 22px; font-size: 13px; font-weight: bold; }
+.labCard output { font-size: 18px; font-variant-numeric: tabular-nums; }
+.labCard input { width: 100%; accent-color: #20797e; margin: 13px 0 5px; }
+.labCard small { font-size: 10px; color: #647e7e; }
+.labCard pre { background: #133b47; color: #f2df9e; padding: 18px; font: 13px/1.8 monospace; border-radius: 10px; user-select: text; }
+.labActions button { background: #dfe9e3; border: 0; border-radius: 8px; color: #245360; padding: 11px 14px; cursor: pointer; font-size: 11px; }
+.labActions a { color: #245360; font-size: 12px; }
+@media (max-width: 600px) {
+  #hud { padding-left: 16px; padding-right: 16px; }
+  #progressBox { max-width: 100px; }
+  #labBtn { padding: 0 12px; }
+  #rideInfo { left: 17px; bottom: 28px; }
+  #rideInfo .eyebrow { max-width: 140px; font-size: 8px; line-height: 1.6; }
+  #rideInfo strong { font-size: 33px; }
+  #rideControls { right: 12px; gap: 7px; }
+  #rideControls button { width: 51px; height: 57px; }
+  #rideControls [data-control="brake"] { width: 67px; }
+  #startScreen { padding: 28px; }
+  #startScreen p { font-size: 11px; }
+  #startScreen .gameTitle { font-size: 13px; margin-bottom: 8px; }
+  .labCard { padding: 22px; }
+  .labCard h2 { font-size: 21px; }
+}
+@media (max-height: 540px) {
+  #startScreen { gap: 9px; padding-top: 65px; padding-bottom: 18px; }
+  #startScreen h1 { font-size: 34px; }
+  #startScreen .gameTitle { margin: 0; }
+  #startScreen p { line-height: 1.5; }
+  #startScreen .hint, #startScreen .lessonLink { display: none; }
+  #startBtn { margin-top: 2px; padding: 12px 24px; }
+}
+
+body:has(.overlay:not(.hidden)) #rideInfo,
+body:has(.overlay:not(.hidden)) #rideControls { visibility: hidden; }
+body:has(#startScreen:not(.hidden)) #hud { visibility: hidden; }

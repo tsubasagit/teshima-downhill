@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<link rel="icon" href="data:,">
 <title>豊島ダウンヒル ｜ 瀬戸内の坂道をスケボーで駆け下りる</title>
 <meta name="description" content="香川県・豊島の坂道をスケートボードで海までかけ下りる3Dゲーム。ブラウザですぐ遊べます。CoderDojo稲城の教材として、コードを書きかえて自分だけのコースが作れます。">
 <link rel="canonical" href="https://tsubasagit.github.io/teshima-downhill/">
@@ -38,15 +39,57 @@
     <span id="progressLabel">レベル 1</span>
     <span id="progressFlag">🏁</span>
   </div>
+  <button id="labBtn" type="button" aria-haspopup="dialog">改造ラボ</button>
+  <button id="pauseBtn" type="button" aria-label="一時停止／再開">Ⅱ</button>
   <button id="soundBtn" type="button" aria-label="音を消す">🔊</button>
 </div>
-<div id="livesBox"></div>
+
+<div id="rideInfo" aria-label="走行状況">
+  <span class="eyebrow">SETouchi / COASTAL ROAD</span>
+  <span><strong id="speedValue">0</strong> <small>速さ</small></span>
+  <span class="distance">港まで <b id="distanceValue">1268</b> <small>unit</small></span>
+</div>
+<div id="rideControls" aria-label="走行操作">
+  <button type="button" data-control="left" aria-label="左へ曲がる">←</button>
+  <button type="button" data-control="brake" aria-label="ブレーキ">ブレーキ<span>↓ / S</span></button>
+  <button type="button" data-control="right" aria-label="右へ曲がる">→</button>
+</div>
+<div id="labPanel" class="hidden" role="dialog" aria-modal="true" aria-labelledby="labTitle">
+  <div class="labCard">
+    <div class="labHeading"><span class="eyebrow">CODERDOJO / PLAY & LEARN</span><button id="labClose" type="button" aria-label="改造ラボを閉じる">閉じる ×</button></div>
+    <h2 id="labTitle">数字ひとつで、走りが変わる。</h2>
+    <p>予想して、変えて、走ってみよう。開いている間は一時停止します。</p>
+    <label for="speedSlider">前に進む速さ <output id="speedOutput">36</output></label>
+    <input id="speedSlider" data-setting="speed" type="range" min="18" max="66" step="1" value="36">
+    <small>18：ゆっくり ← → 66：速い</small>
+    <label for="steerSlider">左右へ曲がる力 <output id="steerAccelOutput">75</output></label>
+    <input id="steerSlider" data-setting="steerAccel" type="range" min="40" max="110" step="1" value="75">
+    <small>小さい：ゆったり / 大きい：きびきび</small>
+    <label for="shakeSlider">カメラのゆれ <output id="cameraShakeOutput">0</output></label>
+    <input id="shakeSlider" data-setting="cameraShake" type="range" min="0" max="0.03" step="0.002" value="0">
+    <small>0 にすると細かなゆれがなくなる</small>
+    <pre id="labCode">speed: 36,
+steerAccel: 75,
+cameraShake: 0,</pre>
+    <p class="labNote">ここでの実験は更新すると元に戻ります。残したい数字は <code>settings.js</code> の同じ名前の行に書いて、保存しよう。</p>
+    <div class="labActions"><button id="labReset" type="button">元の数字に戻す</button><a href="docs/CODERDOJO.md" target="_blank" rel="noopener">教材を読む ↗</a></div>
+  </div>
+</div>
 
 <div id="startScreen" class="overlay">
-  <h1>豊島ダウンヒル</h1>
-  <p>瀬戸内海へ下る坂道を、スケボーでかけぬけよう。<br>← → キー、またはがめんの左右タップで うごく。<br>障害物をよけて、フェリーの見える港をめざそう。</p>
+  <span class="eyebrow">SETouchi ISLAND RIDE / 豊島</span>
+  <h1>海まで、ひと滑り。</h1>
+  <div class="gameTitle">豊島ダウンヒル</div>
+  <p>島々を見おろす坂道。潮風を感じながら、港へ。<br>← → / A D で曲がる・↓ / S でブレーキ。<br>スマホは左右を長押し、または指をすべらせて操作。<br>スペースで一時停止。自分のペースで走ろう。</p>
   <button id="startBtn">🛹 タップしてスタート</button>
   <p class="hint">はじめの1回だけ、けしきの絵をよみこみます。</p>
+  <a class="lessonLink" href="docs/CODERDOJO.md" target="_blank" rel="noopener">CoderDojo：数字を変えて、自分の坂道に ↗</a>
+</div>
+
+<div id="pauseScreen" class="overlay hidden">
+  <h1>一時停止</h1>
+  <p>スペースキーでもう一度走りだせます。</p>
+  <button id="resumeBtn">走りつづける</button>
 </div>
 
 <div id="gameOverScreen" class="overlay hidden">
@@ -72,7 +115,6 @@
   if (location.protocol === 'file:') {
     document.getElementById('startScreen').classList.add('hidden');
     document.getElementById('hud').classList.add('hidden');
-    document.getElementById('livesBox').classList.add('hidden');
     document.getElementById('fileModeScreen').classList.remove('hidden');
     return;
   }
@@ -80,10 +122,20 @@
   const threeScript = document.createElement('script');
   threeScript.src = 'https://unpkg.com/three@0.128.0/build/three.min.js';
   threeScript.onload = () => {
-    const gameScript = document.createElement('script');
-    // 景色素材の更新時に古いゲームコードがブラウザキャッシュへ残らないようにする。
-    gameScript.src = 'game.js?v=20260829-immersion2';
-    document.body.appendChild(gameScript);
+    // 設定 → 動きの計算 → 描画 の順番で読みこむ。
+    const files = ['settings.js', 'physics.js', 'game.js'];
+    function loadNext() {
+      if (!files.length) return;
+      const script = document.createElement('script');
+      script.src = files.shift() + '?v=20260913-stable-coast-v4';
+      script.onload = loadNext;
+      script.onerror = () => {
+        document.querySelector('#startScreen p').textContent = 'ゲームのファイルを読み込めませんでした。ページを更新してください。';
+        document.getElementById('startBtn').disabled = true;
+      };
+      document.body.appendChild(script);
+    }
+    loadNext();
   };
   threeScript.onerror = () => {
     document.querySelector('#startScreen p').textContent = 'ゲームエンジンを読み込めませんでした。インターネット接続を確認して、もう一度開いてください。';

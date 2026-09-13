@@ -1,90 +1,20 @@
 /* =========================================================================
    豊島ダウンヒル - CoderDojo用プロトタイプ
    構成:
-   1. CONFIG      … ★改造ポイント1（速さ・色・ライフ数など）
-   2. COURSE      … ★改造ポイント2（坂道のカーブをつくる）
+   1. settings.js … ★改造する数字（速さ・カメラ・コース）
+   2. physics.js  … 入力から速さ・位置を計算する
    3. シーン構築   … 空・海・棚田・道路・ガードレールをつくる
    4. プレイヤー   … スケーターを組み立てて うごかす
-   5. スポナー     … 障害物をコースにならべる
-   6. 当たり判定   … ★改造ポイント3（新しいルールはここに追加）
-   7. HUD         … 進捗バー・ライフの表示
+   5. 景観配置      … 現地らしい標識・家・畑をならべる
+   6. 走行演出      … ★改造ポイント3（動きの演出はここに追加）
+   7. HUD         … 港までの進み具合を表示
    8. ゲームループ … 毎フレームの更新と描画
    9. 入力        … キーボード・タッチ操作
    ========================================================================= */
 
 
 /* ------------------------- 1. CONFIG ★かえてみよう ------------------------- */
-const CONFIG = {
-  speed: 42,             // 前にすすむ速さ (大きくすると速くなる)
-  steerAccel: 130,        // 左右にうごく加速度
-  steerFriction: 0.86,    // 手をはなしたときの減速 (0〜1、小さいほどすぐ止まる)
-  steerMax: 24,           // 左右移動の最高速度
-  roadWidth: 9.6,         // JA香川県 豊島支店前の県道に近い道路幅
-  laneSpacing: 3.2,       // 3つの走行位置を、現地の幅へ収める
-  lives: 3,               // ライフ数
-  obstacleDensity: 0.32,  // 障害物の出やすさ (0〜1、大きいほど増える)
-  obstacleSpacing: [16, 30], // 障害物を置く候補地点の間隔 [さいしょう, さいだい]
-  jacketColor: 0x4aa8e8,  // パーカーの色 (0xRRGGBB)
-  boardColor: 0xe07a2e,   // スケボーの色
-  slopeRate: 0.24,        // 坂の基本勾配（約13.5度）
-  slopeWave: 0.24,        // 急坂区間で追加する落ち込み（最大勾配は約25.6度）
-  slopeWaveLength: 230,   // 縦カーブ1つ分の長さ
-  startSlopeRate: 0.08,   // スタート直後は緩くし、海へ飛び込む見え方を防ぐ
-  slopeRampLength: 100,   // この距離をかけて本来の急勾配へ移る
-  finishFlattenLength: 145, // 港の駐車場へ入る手前から坂をなだらかにする
-  finishSlopeRate: 0.018, // ゴール地点はほぼ平ら（海へ飛び出さない）
-  poseBlendTime: 0.12,    // 左右の姿勢が切りかわる速さ（秒）
-  cameraBank: 0.075,      // カメラの左右のかたむき
-  cameraFovBoost: 6,      // 走りだしたときの画角のひろがり
-  cameraShake: 0.055,     // 走行中の細かなゆれ
-  hitShake: 0.38,         // ぶつかったときのカメラゆれ
-  cameraHeight: 3.45,     // カメラを高くして、手前の路面を広く見せる
-  cameraBack: 5.8,        // プレイヤーから後ろへ離す距離
-  cameraLookAhead: 14,    // 坂の先を見る距離
-  cameraLookLift: 4.25,   // 注視点を上げ、プレイヤーを画面下側に置く
-  windParticles: innerWidth < 700 ? 42 : 76,
-  edgeSoftZone: 0.8,      // 道のはしで反発しはじめる幅
-  edgeSpring: 46,         // 道の内側へもどす力
-  edgeDamping: 0.78,      // 道のはしで横すべりを弱める量
-  edgeBounce: 0.2,        // 道のはしでの小さな跳ね返り
-  slopeBlendLength: 34,   // 区間ごとの勾配を、この距離でなめらかにつなぐ
-  crestLift: 2.6,         // 坂の頂上でカメラを持ち上げる量（海だけが見える演出）
-  crestLookAhead: 7,      // 頂上で注視点をさらに遠くへ送る距離
-  steepFovBoost: 7,       // 急な下りで画角をひろげる量
-  poleSpacing: 38,        // 電柱をたてる間隔
-  guidePostSpacing: 7,    // 大カーブの黄色ポールの間隔
-  raftCount: 9,           // 海にうかぶ養殖いかだの数
-  ridgeLayers: 3,         // 対岸の山なみのレイヤー数
-  groundTileSize: 30,     // 地面の絵1枚が覆う広さ（ユニット）。大きいほど筆づかいが大きく出る
-  sceneryViewDistance: 480, // 追加した絵は近い区間だけ描画する
-  harborRunout: 150,      // ゴールの先に残す陸地。海までの安全な余白
-  harborWidth: 160,       // 港の駐車場全体の幅
-  softSteerTime: 0.28,    // 押し始めは軽い荷重、押し続けると深いターン
-  balancePeriod: 3.8,     // 直進中に左右へ重心を取り直す周期（秒）
-  balanceSway: 0.018,     // 直進時の小さな体の揺れ
-};
-
-/* ------------------------- 2. COURSE ★かえてみよう -------------------------
-   curve:    カーブの角度（プラスで右カーブ、マイナスで左カーブ、単位は度）
-   length:   そのカーブの長さ
-   slope:    その区間の坂のきつさ（省略すると CONFIG.slopeRate）
-   bigCurve: true にすると「速度落せ」の路面文字と標識セットが手前に出る
-   ぜんぶ curve: 0 にすると まっすぐな坂道になる                            */
-const COURSE = [
-  // JA香川県 豊島支店から海へ下る県道255号付近。頂上の大カーブから港までを抽象化。
-  { curve: 0,    length: 88,  slope: 0.05 },  // 集落を抜ける。まだ ゆるい
-  { curve: 12,   length: 68,  slope: 0.11 },  // 視界がひらけて、海が見えはじめる
-  { curve: 96,   length: 232, slope: 0.30, bigCurve: true },  // ★頂上の大カーブ（10%勾配の標識）
-  { curve: -34,  length: 96,  slope: 0.36 },  // 切りかえして 一気に下る
-  { curve: -88,  length: 214, slope: 0.26, bigCurve: true },  // ★海側へ大きく回りこむ
-  { curve: 46,   length: 128, slope: 0.30 },
-  { curve: -52,  length: 132, slope: 0.24 },  // 棚田のS字
-  { curve: 78,   length: 186, slope: 0.20, bigCurve: true },  // ★みかん畑の大カーブ
-  { curve: -40,  length: 120, slope: 0.26 },
-  { curve: 24,   length: 104, slope: 0.14 },
-  { curve: -16,  length: 96,  slope: 0.09 },
-  { curve: 0,    length: 176, slope: 0.05 },  // 海ぎわを走って港へ
-];
+// 改造用の CONFIG / COURSE は settings.js にまとめています。
 
 // 大カーブの位置をコースから割り出す（標識やポールの配置に使う）
 function findBigCurves(course) {
@@ -92,13 +22,19 @@ function findBigCurves(course) {
   let d = 0;
   for (const seg of course) {
     if (seg.bigCurve || Math.abs(seg.curve) >= 60) {
-      found.push({ start: d, end: d + seg.length, dir: Math.sign(seg.curve) || 1 });
+      found.push({ start: d, end: d + seg.length, dir: Math.sign(seg.curve) || 1, photoCurve: !!seg.photoCurve });
     }
     d += seg.length;
   }
   return found;
 }
 let bigCurves = [];
+
+// 写真の大カーブは、背の高い景色を置かず道路と海の輪郭を見せる特別区間。
+function isPhotoCurveVista(distance, before = 115, after = 70) {
+  const curve = bigCurves.find(item => item.photoCurve);
+  return !!curve && distance >= curve.start - before && distance <= curve.end + after;
+}
 
 
 /* ------------------------- three.js 基本セットアップ ------------------------- */
@@ -158,14 +94,14 @@ function makeSkyTexture() {
   return new THREE.CanvasTexture(c);
 }
 scene.background = makeSkyTexture();
-// 霧の色は「空パノラマの水平線の色」とそろえること（実測 #5cb9f9）。
-// ずれていると、海の遠くだけが霧色にとけた帯になり、空との境に線が出る。
-// 遠さも 2200 では海がすぐ平板になるので、3200 まで伸ばして模様を残す。
-scene.fog = new THREE.Fog(0x5cb9f9, 300, 3200);
+// 空のグラデーションと霧を同じ水色へ寄せ、水平線の境界をなじませる。
+scene.fog = new THREE.Fog(0xc0e3e8, 450, 3600);
 
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 4000);
+// 近すぎる描画面（0.1）は遠い海岸の奥行き精度を浪費する。
+// 手前2ユニットには景色を置かず、海と岸の前後判定を安定させる。
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 2, 4000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, innerWidth < 700 ? 1.5 : 1.75));
 renderer.setSize(innerWidth, innerHeight);
 wrap.appendChild(renderer.domElement);
 scene.add(camera);
@@ -218,6 +154,57 @@ function buildWindLines() {
 
 const wind = buildWindLines();
 
+// 海の時間はゲームと共有する。一時停止時も波の位相が飛ばない。
+const oceanTime = { value: 0 };
+function shadeOcean(material) {
+  material.onBeforeCompile = shader => {
+    shader.uniforms.oceanTime = oceanTime;
+    shader.vertexShader = 'varying vec3 oceanWorld;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+      #include <begin_vertex>
+      oceanWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+    `);
+    shader.fragmentShader = 'varying vec3 oceanWorld;\nuniform float oceanTime;\n' + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
+      #include <map_fragment>
+      vec2 water = oceanWorld.xz;
+      float w1 = dot(water, vec2(0.18, 0.11)) + oceanTime * 0.65;
+      float w2 = dot(water, vec2(-0.09, 0.24)) - oceanTime * 0.48;
+      float rippleFade = 1.0 - smoothstep(60.0, 600.0, distance(cameraPosition, oceanWorld));
+      vec3 normalWater = normalize(vec3((-0.025*cos(w1)-0.012*cos(w2))*rippleFade, 1.0,
+        (-0.015*cos(w1)+0.028*cos(w2))*rippleFade));
+      vec3 viewWater = normalize(cameraPosition - oceanWorld);
+      float fresnelWater = pow(1.0 - max(dot(normalWater, viewWater), 0.0), 4.0);
+      vec3 sunWater = normalize(vec3(-0.35, 0.48, -0.6));
+      float glint = pow(max(dot(normalWater, normalize(viewWater + sunWater)), 0.0), 96.0);
+      float broadLight = 0.99 + (0.005*sin(w1) + 0.005*sin(w2))*rippleFade;
+      // 絵の模様を少し残した穏やかな水色。遠くほど水平線の色へなじませる。
+      float textureStrength = mix(0.42, 0.18, smoothstep(350.0, 2300.0, distance(cameraPosition, oceanWorld)));
+      vec3 seaBase = mix(vec3(0.12,0.53,0.63), diffuseColor.rgb, textureStrength) * broadLight;
+      diffuseColor.rgb = mix(seaBase, vec3(0.57,0.77,0.81), fresnelWater * 0.48);
+      // 遠くの細かいハイライトは弱め、走行中のちらつきを抑える。
+      float detailFade = 1.0 - smoothstep(180.0, 1100.0, distance(cameraPosition, oceanWorld));
+      diffuseColor.rgb += vec3(0.85,0.88,0.73) * glint * 0.35 * detailFade;
+    `);
+  };
+  material.customProgramCacheKey = () => 'setouchi-water-light-v3';
+}
+
+// 人物画像から独立した接地影。カメラへ向けず、実際の道路勾配に沿わせる。
+const contactShadow = new THREE.Mesh(new THREE.PlaneGeometry(1.45, 2.45),
+  new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: { strength: { value: 0.28 } },
+    vertexShader: `varying vec2 shadowUv; void main(){ shadowUv=uv;
+      gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: `varying vec2 shadowUv; uniform float strength;
+      void main(){ float radius=length((shadowUv-0.5)*2.0);
+      float alpha=(1.0-smoothstep(0.0,1.0,radius))*strength;
+      gl_FragColor=vec4(0.035,0.055,0.065,alpha); }`
+  }));
+contactShadow.renderOrder = 1;
+scene.add(contactShadow);
+
 
 /* ------------------------- パス（坂道の骨格）を組み立てる ------------------------- */
 const DL = 2; // サンプリング間隔
@@ -237,12 +224,16 @@ function buildPath(course) {
   // 区間のつなぎ目で道がカクッと折れないよう、坂のきつさをならす
   const window = Math.max(1, Math.round(CONFIG.slopeBlendLength / DL));
   const eased = new Array(steps.length);
+  const easedTurn = new Array(steps.length);
   for (let i = 0; i < steps.length; i++) {
-    let sum = 0;
+    let sum = 0, turnSum = 0;
     for (let k = -window; k <= window; k++) {
-      sum += steps[THREE.MathUtils.clamp(i + k, 0, steps.length - 1)].base;
+      const step = steps[THREE.MathUtils.clamp(i + k, 0, steps.length - 1)];
+      sum += step.base;
+      turnSum += step.dHeading;
     }
     eased[i] = sum / (window * 2 + 1);
+    easedTurn[i] = turnSum / (window * 2 + 1);
   }
 
   // 実際に道をすすめながら、位置と坂のきつさを記録する
@@ -260,7 +251,7 @@ function buildPath(course) {
     // 「頂上で道が消える」演出は、うねりではなく COURSE の変わり目で出したい。
     let courseGrade = THREE.MathUtils.lerp(CONFIG.startSlopeRate, eased[i], rampT);
     courseGrade = THREE.MathUtils.lerp(CONFIG.finishSlopeRate, courseGrade, finishT);
-    heading += steps[i].dHeading;
+    heading += easedTurn[i];
     x += Math.sin(heading) * DL;
     z -= Math.cos(heading) * DL;
     y -= grade * DL;
@@ -271,6 +262,13 @@ function buildPath(course) {
 }
 
 function sampleAt(path, dist) {
+  // カメラの足元にも道を敷く。競技の開始位置は0のまま、負の距離は見える道路だけ。
+  if (dist < 0) {
+    const sample = sampleAt(path, 0);
+    sample.pos.addScaledVector(sample.forward, dist);
+    sample.pos.y -= sample.grade * dist;
+    return sample;
+  }
   const maxDist = (path.length - 1) * DL;
   dist = Math.max(0, Math.min(dist, maxDist));
   const idx = dist / DL;
@@ -383,7 +381,8 @@ function applyTex(tex, material, repeat) {
     if (renderer?.capabilities) {
       t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
     }
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.wrapS = t.wrapT = material.userData.seamlessRepeat
+      ? THREE.MirroredRepeatWrapping : THREE.RepeatWrapping;
     t.repeat.set(repeat[0], repeat[1]);
   }
   material.map = t;
@@ -392,13 +391,7 @@ function applyTex(tex, material, repeat) {
   material.needsUpdate = true;
 }
 function onTextureReady(key, tex) {
-  if (key === 'sky') {
-    skyDome.material.map = tex;
-    skyDome.material.color.setHex(0xffffff);
-    skyDome.material.needsUpdate = true;
-    skyDome.visible = true;
-    return;
-  }
+  if (key === 'sky') return; // 空はグラデーションで描く。
   for (const { material, repeat } of (TEX_TARGETS[key] || [])) applyTex(tex, material, repeat);
 
   // 板ポリで作りなおしたい素材は、あとから組み立てなおす
@@ -412,15 +405,23 @@ function onTextureReady(key, tex) {
 // 画像がとどいたら組み立てなおす（ゲームループの中から安全に呼ぶ）
 const pendingRebuild = {};
 function applyPendingRebuilds() {
+  if (state.running) return;
   if (pendingRebuild.player && TEX.skater) {
     pendingRebuild.player = false;
-    if (player) scene.remove(player);
+    if (player) {
+      scene.remove(player);
+      player.traverse(object => {
+        if (!object.isMesh) return;
+        object.geometry.dispose();
+        object.material.dispose();
+      });
+    }
     player = buildPlayer();
   }
   const sceneryKeys = [
     'shop', 'cloud', 'ground', 'fantasyGrass', 'fantasyGrassB', 'fantasyGrassC',
     'fantasyTreeA', 'fantasyTreeB', 'fantasyTerrace', 'fantasyBranch',
-    'fantasyObstacle', 'fantasyTruck', 'fantasyBus', 'fantasyHedge',
+    'fantasyHedge',
     'fantasyGrove', 'fantasySlope', 'harborMirror', 'harborSeawall',
     'harborCars', 'harborShelter', 'harborParking', 'villageHouseA',
     'villageHouseB', 'meadowBankA', 'meadowBankB',
@@ -437,13 +438,26 @@ function applyPendingRebuilds() {
 // 空のドーム（画像がよみこめたら表示される）
 const skyDome = new THREE.Mesh(
   new THREE.SphereGeometry(1800, 32, 16),
-  new THREE.MeshBasicMaterial({ side: THREE.BackSide, fog: false, depthWrite: false })
+  new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false,
+    vertexShader: `varying vec3 skyDirection;
+      void main() { skyDirection = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: `varying vec3 skyDirection;
+      void main() {
+        vec3 direction = normalize(skyDirection);
+        float height = pow(max(direction.y,0.0),0.55);
+        vec3 color = mix(vec3(0.75,0.89,0.91),vec3(0.22,0.57,0.79),height);
+        float sun = pow(max(dot(direction,normalize(vec3(-0.55,0.48,-0.7))),0.0),240.0);
+        float glow = pow(max(dot(direction,normalize(vec3(-0.55,0.48,-0.7))),0.0),12.0);
+        color += vec3(0.28,0.23,0.12)*glow + vec3(0.4,0.34,0.2)*sun;
+        gl_FragColor = vec4(color,1.0);
+      }`
+  })
 );
-skyDome.visible = false;
+skyDome.visible = true;
 scene.add(skyDome);
 
-loadTex('sky', 'sky_sea_panorama.jpg', undefined, 'sky_fantasy.jpg');
-loadTex('sea', 'sea_surface_fantasy_v2.jpg', undefined, 'sea_tile.jpg');
+// 空はコードで描くので、空画像のダウンロードは不要。
+loadTex('sea', 'sea_surface_setouchi_v3.webp', undefined, 'sea_surface_fantasy_v2.jpg');
 loadTex('road', 'road_asphalt_teshima.jpg', undefined, 'road_stone_tile.jpg');
 loadTex('wall', 'stone_wall_tile.jpg');
 loadTex('ground', 'meadow_ground_v3.jpg', undefined, 'meadow_ground_v2.jpg');
@@ -456,9 +470,6 @@ loadTex('fantasyTreeA', 'tree_fantasy_a.webp');
 loadTex('fantasyTreeB', 'tree_fantasy_b.webp');
 loadTex('fantasyTerrace', 'terrace_fantasy.webp');
 loadTex('fantasyBranch', 'branch_fantasy.webp');
-loadTex('fantasyObstacle', 'obstacle_fantasy.webp');
-loadTex('fantasyTruck', 'truck_fantasy.webp');
-loadTex('fantasyBus', 'bus_fantasy.webp');
 loadTex('fantasyHedge', 'hedge_fantasy.webp');
 loadTex('fantasyGrove', 'grove_fantasy.webp');
 loadTex('fantasySlope', 'slope_fantasy.webp');
@@ -472,8 +483,6 @@ loadTex('villageHouseB', 'village_house_c.webp');
 loadTex('meadowBankA', 'meadow_bank_a.webp');
 loadTex('meadowBankB', 'meadow_bank_b.webp');
 loadTex('skater', 'skater_back.webp');
-loadTex('skaterLeft', 'skater_left_v2.webp', undefined, 'skater_left.webp');
-loadTex('skaterRight', 'skater_right.webp');
 loadTex('wildflowerVerge', 'wildflower_verge_0828.webp');
 loadTex('stoneSteps', 'stone_steps_0828.webp');
 loadTex('camphorTree', 'camphor_tree_0828.webp');
@@ -481,14 +490,11 @@ loadTex('oliveGrove', 'olive_grove_0828.webp');
 loadTex('gardenCottage', 'garden_cottage_0828.webp');
 loadTex('fishingShed', 'fishing_shed_0828.webp');
 loadTex('skaterBalanceA', 'skater_balance_a_alpha_0828.webp');
-loadTex('skaterBalanceB', 'skater_balance_b_alpha_0828.webp');
-loadTex('skaterSoftLeft', 'skater_soft_left_alpha_0828.webp');
-loadTex('skaterSoftRight', 'skater_soft_right_alpha_0828.webp');
 
 function buildRibbon(path, offsetLeft, offsetRight, material, yLift = 0, uvRepeat = 0) {
   const verts = [];
   const uvs = [];
-  for (let i = 0; i < path.length - 1; i++) {
+  for (let i = -Math.ceil(32 / DL); i < path.length - 1; i++) {
     const a = sampleAt(path, i * DL);
     const b = sampleAt(path, (i + 1) * DL);
     const aL = a.pos.clone().addScaledVector(a.right, offsetLeft); aL.y += yLift;
@@ -516,6 +522,42 @@ function groundWave(d, seed = 0) {
   return Math.sin(d * 0.041 + seed) * 1.45 + Math.sin(d * 0.113 + seed * 2.1) * 0.62;
 }
 
+// 隣接する帯は同じ境界座標から同じ高さを求める。帯ごとの位相差で穴を作らない。
+function terrainRipple(d, offset) {
+  const shoulder = CONFIG.roadWidth / 2 + (offset < 0 ? 7 : 5.2);
+  const weight = THREE.MathUtils.smoothstep(Math.abs(offset) - shoulder, 0, 36);
+  return weight * (Math.sin(d * 0.023 + offset * 0.035) * 0.55
+    + Math.sin(d * 0.059 - offset * 0.018) * 0.18);
+}
+
+// 最初の右カーブは左が海側。外へ行くほど地面を下げ、遠景の海を大きく開く。
+function seaVistaDrop(d, offset) {
+  if (offset >= 0) return 0;
+  const length = COURSE.reduce((sum, segment) => sum + segment.length, 0);
+  const coastal = 1 - THREE.MathUtils.smoothstep(d, length - 320, length - 180);
+  const lateral = THREE.MathUtils.smoothstep(Math.abs(offset), CONFIG.roadWidth / 2 + 1.2, CONFIG.roadWidth / 2 + 58);
+  return -CONFIG.coastDrop * coastal * lateral;
+}
+
+// 葉先のアルファは残し、画像矩形の端と根元だけをフェードさせる。
+function softenSceneryEdges(material) {
+  material.alphaTest = 0.025;
+  material.onBeforeCompile = shader => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <alphatest_fragment>', `
+      #ifdef USE_MAP
+        float edgeX = min(vUv.x, 1.0 - vUv.x);
+        float border = smoothstep(0.0, 0.035, edgeX)
+          * smoothstep(0.0, 0.045, vUv.y)
+          * smoothstep(0.0, 0.018, 1.0 - vUv.y);
+        diffuseColor.a *= border;
+      #endif
+      #include <alphatest_fragment>
+    `);
+  };
+  material.customProgramCacheKey = () => 'scenery-soft-border-v1';
+  return material;
+}
+
 // 横方向にも高さを変える帯。道路脇の土手を水平な板ではなく斜面にする。
 // wave を true にすると、外側のふちだけ うねる。
 // taper は「外がわのふちを どれだけ立ち上げるか」を距離から返す関数（0〜1）。
@@ -523,28 +565,38 @@ function groundWave(d, seed = 0) {
 function buildSlopedRibbon(path, offsetLeft, offsetRight, material, yLeft, yRight, uvRepeat = 0, wave = 0, taper = null) {
   const verts = [];
   const uvs = [];
-  for (let i = 0; i < path.length - 1; i++) {
+  for (let i = -Math.ceil(32 / DL); i < path.length - 1; i++) {
     const a = sampleAt(path, i * DL);
     const b = sampleAt(path, (i + 1) * DL);
     const da = i * DL, db = (i + 1) * DL;
     const tA = taper ? taper(da) : 1;
     const tB = taper ? taper(db) : 1;
-    const offA = THREE.MathUtils.lerp(offsetRight, offsetLeft, tA);
-    const offB = THREE.MathUtils.lerp(offsetRight, offsetLeft, tB);
+    // 港では高さだけを寝かせる。幅まで縮めると帯が尖り、海との切れ目になる。
+    const offA = offsetLeft;
+    const offB = offsetLeft;
     const yOutA = THREE.MathUtils.lerp(yRight, yLeft, tA);
     const yOutB = THREE.MathUtils.lerp(yRight, yLeft, tB);
     // うねりは「道から遠いほう」のふちにだけ足す
-    const waveOuterA = wave ? groundWave(da, offsetLeft) * wave * tA : 0;
-    const waveOuterB = wave ? groundWave(db, offsetLeft) * wave * tB : 0;
-    const aL = a.pos.clone().addScaledVector(a.right, offA); aL.y += yOutA + waveOuterA;
-    const aR = a.pos.clone().addScaledVector(a.right, offsetRight); aR.y += yRight;
-    const bL = b.pos.clone().addScaledVector(b.right, offB); bL.y += yOutB + waveOuterB;
-    const bR = b.pos.clone().addScaledVector(b.right, offsetRight); bR.y += yRight;
-    verts.push(aL.x, aL.y, aL.z, aR.x, aR.y, aR.z, bL.x, bL.y, bL.z);
-    verts.push(bL.x, bL.y, bL.z, aR.x, aR.y, aR.z, bR.x, bR.y, bR.z);
-    if (uvRepeat) {
-      const v0 = (i * DL) / uvRepeat, v1 = ((i + 1) * DL) / uvRepeat;
-      uvs.push(0, v0, 1, v0, 0, v1, 0, v1, 1, v0, 1, v1);
+    const waveOuterA = terrainRipple(da, offA);
+    const waveOuterB = terrainRipple(db, offB);
+    const aL = a.pos.clone().addScaledVector(a.right, offA); aL.y += yOutA + waveOuterA + seaVistaDrop(da, offA);
+    const aR = a.pos.clone().addScaledVector(a.right, offsetRight); aR.y += yRight + terrainRipple(da, offsetRight) + seaVistaDrop(da, offsetRight);
+    const bL = b.pos.clone().addScaledVector(b.right, offB); bL.y += yOutB + waveOuterB + seaVistaDrop(db, offB);
+    const bR = b.pos.clone().addScaledVector(b.right, offsetRight); bR.y += yRight + terrainRipple(db, offsetRight) + seaVistaDrop(db, offsetRight);
+    /* 左側の帯は外側offsetが小さく、右側の帯は外側offsetが大きい。
+       同じ頂点順で作ると右側だけ裏面になり、上から見たとき農地が消えて
+       奥の海が透ける。左右どちらでも法線が空へ向く順に三角形を並べる。 */
+    const outerIsLeft = offA <= offsetRight && offB <= offsetRight;
+    const v0 = uvRepeat ? (i * DL) / uvRepeat : 0;
+    const v1 = uvRepeat ? ((i + 1) * DL) / uvRepeat : 0;
+    if (outerIsLeft) {
+      verts.push(aL.x, aL.y, aL.z, aR.x, aR.y, aR.z, bL.x, bL.y, bL.z);
+      verts.push(bL.x, bL.y, bL.z, aR.x, aR.y, aR.z, bR.x, bR.y, bR.z);
+      if (uvRepeat) uvs.push(0,v0, 1,v0, 0,v1, 0,v1, 1,v0, 1,v1);
+    } else {
+      verts.push(aR.x, aR.y, aR.z, aL.x, aL.y, aL.z, bR.x, bR.y, bR.z);
+      verts.push(bR.x, bR.y, bR.z, aL.x, aL.y, aL.z, bL.x, bL.y, bL.z);
+      if (uvRepeat) uvs.push(1,v0, 0,v0, 1,v1, 1,v1, 0,v0, 0,v1);
     }
   }
   const geo = new THREE.BufferGeometry();
@@ -558,7 +610,7 @@ function buildSlopedRibbon(path, offsetLeft, offsetRight, material, yLeft, yRigh
 function buildWall(path, offset, height, material, yBase = 0, uvRepeat = 0) {
   const verts = [];
   const uvs = [];
-  for (let i = 0; i < path.length - 1; i++) {
+  for (let i = -Math.ceil(32 / DL); i < path.length - 1; i++) {
     const a = sampleAt(path, i * DL);
     const b = sampleAt(path, (i + 1) * DL);
     const aP = a.pos.clone().addScaledVector(a.right, offset);
@@ -585,7 +637,7 @@ function makeCloudCluster(rng, tall = false) {
   // 画像があれば1枚絵の板（つねにカメラを向く）
   if (TEX.cloud) {
     const g = new THREE.Group();
-    const mat = new THREE.MeshBasicMaterial({ map: TEX.cloud, transparent: true, depthWrite: false, fog: false });
+    const mat = softenSceneryEdges(new THREE.MeshBasicMaterial({ map: TEX.cloud, transparent: true, opacity: 0.82, depthWrite: false, fog: false }));
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, tall ? 2.4 : 1.6), mat);
     // 同じ絵の使いまわしなので、半分は左右反転して並びの繰り返しを目立たなくする
     if (rng() < 0.5) plane.scale.x = -1;
@@ -618,6 +670,7 @@ function makeSceneryPlane(texture, width, height, y = height * 0.45) {
     color: 0xffffff,
   });
   const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+  softenSceneryEdges(mat);
   plane.position.y = y;
   plane.userData.billboard = true;
   return plane;
@@ -681,6 +734,7 @@ function makeVillagePicture(textures, rng, width = 10.8, height = 8.0) {
     side: THREE.DoubleSide,
   });
   const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+  softenSceneryEdges(mat);
   plane.position.y = height * 0.46;
   g.add(plane);
   // 生成画像自体が3/4視点なので、カメラへ向けても正面一枚絵には見えない。
@@ -1067,6 +1121,7 @@ function makePaintedProp(texture, width) {
     map: texture, transparent: true, alphaTest: 0.12, depthWrite: false, side: THREE.DoubleSide,
   });
   const mesh = new THREE.Mesh(sharedGeo(`painted-${width}-${height}`, () => new THREE.PlaneGeometry(width, height)), material);
+  softenSceneryEdges(material);
   mesh.position.y = height * 0.45;
   group.add(mesh);
   group.userData.billboard = true;
@@ -1079,7 +1134,7 @@ function buildPaintedLandmarks(path, totalLength) {
   const rng = mulberry32(8282026);
   const half = CONFIG.roadWidth / 2;
   function place(texture, width, d, side, offset, lift = 0, moves = false) {
-    if (!texture || d < 0 || d > totalLength) return;
+    if (!texture || d < 0 || d > totalLength || isPhotoCurveVista(d) || (side < 0 && d < totalLength - 260)) return;
     const s = sampleAt(path, d);
     const prop = makePaintedProp(texture, width);
     const scale = 0.9 + rng() * 0.16;
@@ -1140,7 +1195,8 @@ function buildScenery(path, totalLength) {
   const coast = end.pos.clone().addScaledVector(end.forward, 520); // 海面は駐車場より十分先
 
   // 現地の県道に合わせた、濃い青灰色のアスファルト。
-  const roadMat = useTex('road', new THREE.MeshLambertMaterial({ color: 0x596166 }), [2.4, totalLength / 11]);
+  const roadMat = useTex('road', new THREE.MeshStandardMaterial({ color: 0x596166,
+    roughness: 0.94, metalness: 0 }), [2.4, totalLength / 11]);
   worldGroup.add(buildRibbon(path, -roadHalf, roadHalf, roadMat, 0, totalLength));
 
   // 現地の白い外側線と、中央の短い破線。
@@ -1148,7 +1204,7 @@ function buildScenery(path, totalLength) {
   worldGroup.add(buildRibbon(path, -roadHalf + 0.22, -roadHalf + 0.34, lineMat, 0.035));
   worldGroup.add(buildRibbon(path, roadHalf - 0.34, roadHalf - 0.22, lineMat, 0.035));
   const dashGeo = new THREE.BoxGeometry(0.13, 0.025, 3.4);
-  for (let d = 8; d < totalLength; d += 11) {
+  for (let d = -25; d < totalLength; d += 11) {
     const s = sampleAt(path, d);
     const dash = new THREE.Mesh(dashGeo, lineMat);
     dash.position.copy(s.pos);
@@ -1159,43 +1215,63 @@ function buildScenery(path, totalLength) {
     worldGroup.add(dash);
   }
 
-  // ストリートビューで目立つ、坂の入口の白い減速用シェブロン。
+  // 添付写真で目立つ白い減速用シェブロンを、海へ正対する直線から右大カーブへ並べる。
   const chevronGeo = new THREE.BoxGeometry(2.35, 0.026, 0.22);
-  for (let d = 26; d < 82; d += 13) {
-    const s = sampleAt(path, d);
-    const mark = new THREE.Group();
-    for (const side of [-1, 1]) {
-      const bar = new THREE.Mesh(chevronGeo, lineMat);
-      bar.position.x = side * 0.95;
-      bar.rotation.y = side * 0.48;
-      mark.add(bar);
+  const photoCurve = bigCurves.find(curve => curve.photoCurve);
+  if (photoCurve) {
+    for (let d = photoCurve.start - 88; d < photoCurve.start + 68; d += 13) {
+      const s = sampleAt(path, d);
+      const mark = new THREE.Group();
+      for (const side of [-1, 1]) {
+        const bar = new THREE.Mesh(chevronGeo, lineMat);
+        bar.position.x = side * 0.95;
+        bar.rotation.y = side * 0.48;
+        mark.add(bar);
+      }
+      // 写真と同じく、右へ曲がる道路の左車線側へ寄せる。
+      mark.position.copy(s.pos).addScaledVector(s.right, -1.45);
+      mark.position.y += 0.045;
+      mark.rotation.order = 'YXZ';
+      mark.rotation.y = -s.heading;
+      mark.rotation.x = -s.pitch;
+      worldGroup.add(mark);
     }
-    mark.position.copy(s.pos);
-    mark.position.y += 0.045;
-    mark.rotation.order = 'YXZ';
-    mark.rotation.y = -s.heading;
-    mark.rotation.x = -s.pitch;
-    worldGroup.add(mark);
   }
 
-  // 道路脇を3段に分ける。大きな平面1枚ではなく、高低差のある草地と石垣にする。
-  // 大きな筆跡・土・小花が遠くでも残るよう、細かい反復をやめて低回数で貼る。
-  // UV は「帯の幅ぜんぶで 0→1」「コース全長で 0→1」でつくってある。
-  // そのため横と縦で「1タイルが覆うユニット数」をそろえないと、
-  // 草が進行方向へ引きのばされて、地面が縞のように見えてしまう。
+  // 草地を共通の世界座標で描く。帯の境界で模様・色・縮尺をリセットしない。
   const tile = CONFIG.groundTileSize;
-  const alongRepeat = Math.max(4, Math.round(totalLength / tile));
-  // 引数は「その材質を貼る帯のだいたいの幅」。左右で幅がちがうので平均を渡す。
-  const makeGroundMat = (bandWidth, tint) => {
-    const material = new THREE.MeshLambertMaterial({ color: tint });
-    material.userData.textureTint = tint;
-    return useTex('ground', material, [bandWidth / tile, alongRepeat]);
+  const grassNearMat = new THREE.MeshLambertMaterial({ color: 0xc0cbaa });
+  grassNearMat.userData.textureTint = 0xc0cbaa;
+  grassNearMat.userData.seamlessRepeat = true;
+  useTex('ground', grassNearMat, [1, 1]);
+  grassNearMat.onBeforeCompile = shader => {
+    shader.uniforms.groundTileSize = { value: tile };
+    shader.vertexShader = 'varying vec2 landscapeXZ;\n' + shader.vertexShader;
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+      #include <begin_vertex>
+      landscapeXZ = (modelMatrix * vec4(position, 1.0)).xz;
+    `);
+    shader.fragmentShader = 'varying vec2 landscapeXZ;\nuniform float groundTileSize;\n' + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
+      #ifdef USE_MAP
+        vec2 terrainUV = landscapeXZ / groundTileSize;
+        // 違う角度・大きさの模様を混ぜてタイルの周期を目立たなくする。
+        vec4 groundA = mapTexelToLinear(texture2D(map, terrainUV));
+        vec2 rotatedUV = mat2(0.8, -0.6, 0.6, 0.8) * terrainUV * 0.61 + vec2(0.37, 0.71);
+        vec4 groundB = mapTexelToLinear(texture2D(map, rotatedUV));
+        float patches = 0.5 + 0.5 * sin(landscapeXZ.x * 0.029 + sin(landscapeXZ.y * 0.017));
+        vec3 soil = mix(groundA.rgb, groundB.rgb, 0.30 + 0.25 * patches);
+        float lightPatch = sin(landscapeXZ.x * 0.041 + landscapeXZ.y * 0.019)
+          * sin(landscapeXZ.y * 0.033 - landscapeXZ.x * 0.012);
+        diffuseColor.rgb *= soil * (0.96 + lightPatch * 0.055);
+      #endif
+    `);
   };
-  const grassNearMat = makeGroundMat(6.1, 0xaab99e);
-  const grassMidMat = makeGroundMat(14.4, 0x9fb394);
-  const grassFarMat = makeGroundMat(31, 0x96aa8d);
-  worldGroup.add(buildRibbon(path, -roadHalf - 7, -roadHalf, grassNearMat, -0.06, totalLength));
-  worldGroup.add(buildSlopedRibbon(path, -roadHalf - 24, -roadHalf - 7, grassMidMat, 2.0, 0.82, totalLength, 0.55));
+  grassNearMat.customProgramCacheKey = () => 'continuous-landscape-v1';
+  const grassMidMat = grassNearMat;
+  const grassFarMat = grassNearMat;
+  worldGroup.add(buildSlopedRibbon(path, -roadHalf - 7, -roadHalf, grassNearMat, -0.06, -0.06, totalLength));
+  worldGroup.add(buildSlopedRibbon(path, -roadHalf - 24, -roadHalf - 7, grassMidMat, 2.0, -0.06, totalLength, 0.55));
   worldGroup.add(buildSlopedRibbon(path, -roadHalf - 58, -roadHalf - 24, grassFarMat, 4.1, 2.0, totalLength, 1.0));
   // 右の草地を擁壁までつなぎ、間から低い海面がのぞく隙間を完全にふさぐ。
   worldGroup.add(buildRibbon(path, roadHalf, roadHalf + 5.2, grassNearMat, -0.06, totalLength));
@@ -1214,7 +1290,7 @@ function buildScenery(path, totalLength) {
     const offset = side * (roadHalf + 0.28);
     worldGroup.add(buildWall(path, offset, 0.16, railMat, 0.58));
     const spots = [];
-    for (let d = 2; d < totalLength; d += 6.5) {
+    for (let d = -30; d < totalLength; d += 6.5) {
       const s = sampleAt(path, d);
       spots.push(s.pos.clone().addScaledVector(s.right, offset));
     }
@@ -1229,7 +1305,7 @@ function buildScenery(path, totalLength) {
 
   // 両側の段差を石積みで見せ、横方向の奥行きをはっきりさせる。
   const stoneMatR = useTex('wall', new THREE.MeshLambertMaterial({ color: 0xbdb49e }), [totalLength / 6, 1]);
-  worldGroup.add(buildWall(path, -roadHalf - 7, 0.92, stoneMatR, -0.06, totalLength));
+  // 海側は斜面の高さを連続させ、浮いた石垣を置かない。
   worldGroup.add(buildWall(path, roadHalf + 5.2, 1.15, stoneMatR, -0.05, totalLength));
   worldGroup.add(buildSlopedRibbon(path, roadHalf + 17, roadHalf + 5.2, grassMidMat, 2.3, 1.02, totalLength, 0.6));
   worldGroup.add(buildSlopedRibbon(path, roadHalf + 45, roadHalf + 17, grassFarMat, 4.8, 2.3, totalLength, 1.15));
@@ -1260,6 +1336,10 @@ function buildScenery(path, totalLength) {
   // 電柱と電線を右側にとおす。日本の田舎道らしさは これが効く。
   let prevPole = null;
   for (let d = 22; d < totalLength - 40; d += CONFIG.poleSpacing) {
+    if (isPhotoCurveVista(d, 70, 40)) {
+      prevPole = null;
+      continue;
+    }
     const s = sampleAt(path, d);
     const pole = makeUtilityPole();
     const pp = s.pos.clone().addScaledVector(s.right, roadHalf + 1.9);
@@ -1307,10 +1387,46 @@ function buildScenery(path, totalLength) {
       postSpots.push(s.pos.clone().addScaledVector(s.right, outer * (roadHalf + 0.95)));
     }
     worldGroup.add(buildGuidePosts(postSpots));
+
+    if (curve.photoCurve) {
+      // 写真のカーブだけは太い銀色の上桟を左右へ連続させ、遠くからでも曲線を読めるようにする。
+      const railGeo = new THREE.BoxGeometry(0.24, 0.2, DL + 0.45);
+      const railMatHero = new THREE.MeshLambertMaterial({ color: 0xdce5e8, emissive: 0x1a262a });
+      const dummy = new THREE.Object3D();
+      for (const side of [-1, 1]) {
+        const samples = [];
+        for (let d = curve.start - 24; d < curve.end + 22; d += DL) samples.push(sampleAt(path, d));
+        const rail = new THREE.InstancedMesh(railGeo, railMatHero, samples.length);
+        samples.forEach((s, i) => {
+          dummy.position.copy(s.pos).addScaledVector(s.right, side * (roadHalf + 0.38));
+          dummy.position.y += 0.84;
+          dummy.rotation.order = 'YXZ';
+          dummy.rotation.y = -s.heading;
+          dummy.rotation.x = -s.pitch;
+          dummy.rotation.z = 0;
+          dummy.updateMatrix();
+          rail.setMatrixAt(i, dummy.matrix);
+        });
+        rail.instanceMatrix.needsUpdate = true;
+        worldGroup.add(rail);
+      }
+
+      // 外側の右折標識を繰り返し、曲がる方向を一目で伝える。
+      for (const d of [curve.start + 54, curve.start + 118]) {
+        const s = sampleAt(path, d);
+        const sign = makeCurveSign(curve.dir);
+        const p = s.pos.clone().addScaledVector(s.right, outer * (roadHalf + 1.45));
+        sign.position.copy(p);
+        sign.rotation.y = -s.heading;
+        sign.scale.setScalar(1.16);
+        worldGroup.add(sign);
+      }
+    }
   }
 
   // 木（右の段の上にランダムに）
   for (let d = 12; d < totalLength; d += 16 + rng() * 14) {
+    if (isPhotoCurveVista(d)) continue;
     const s = sampleAt(path, d);
     const tree = makeTree(rng);
     const p = s.pos.clone().addScaledVector(s.right, roadHalf + 5 + rng() * 18);
@@ -1324,8 +1440,10 @@ function buildScenery(path, totalLength) {
   // 幻想的な草むらを両側へ重ね、平らな緑の帯に奥行きと光を足す。
   if (TEX.fantasyGrass) {
     for (let d = 7; d < totalLength; d += 8 + rng() * 7) {
+      if (isPhotoCurveVista(d, 85, 45)) continue;
       const s = sampleAt(path, d);
       for (const side of [-1, 1]) {
+        if (side < 0 && d < totalLength - 260) continue;
         if (rng() < 0.1) continue;
         const grass = makeFantasyGrass(rng);
         const offset = side < 0 ? roadHalf + 3.4 + rng() * 4.2 : roadHalf + 8.2 + rng() * 6.0;
@@ -1353,8 +1471,10 @@ function buildScenery(path, totalLength) {
   for (const layer of layeredScenery) {
     if (!layer.texture) continue;
     for (let d = 105 + rng() * 20; d < totalLength - 95; d += layer.step + rng() * layer.step * 0.35) {
+      if (isPhotoCurveVista(d)) continue;
       const s = sampleAt(path, d);
       for (const side of [-1, 1]) {
+        if (side < 0 && d < totalLength - 260) continue;
         if (layer.texture === TEX.fantasySlope && side < 0 && rng() < 0.45) continue;
         const sprite = makeSceneryPlane(layer.texture, layer.width, layer.height, layer.height * 0.43);
         const offset = layer.near + rng() * (layer.texture === TEX.fantasyGrove ? 12 : 5);
@@ -1373,19 +1493,22 @@ function buildScenery(path, totalLength) {
   buildPaintedLandmarks(path, totalLength);
 
   // スタート付近右側の支店建物と駐車場。
-  const branchS = sampleAt(path, 58);
-  const branch = makeIslandBranch();
-  const branchP = branchS.pos.clone().addScaledVector(branchS.right, roadHalf + 11.5);
-  branch.position.set(branchP.x, branchP.y + 0.12, branchP.z);
-  if (branch.userData.billboard) {
-    billboards.push(branch);
-  } else {
-    branch.rotation.y = -branchS.heading - Math.PI / 2;
+  if (!isPhotoCurveVista(58)) {
+    const branchS = sampleAt(path, 58);
+    const branch = makeIslandBranch();
+    const branchP = branchS.pos.clone().addScaledVector(branchS.right, roadHalf + 11.5);
+    branch.position.set(branchP.x, branchP.y + 0.12, branchP.z);
+    if (branch.userData.billboard) {
+      billboards.push(branch);
+    } else {
+      branch.rotation.y = -branchS.heading - Math.PI / 2;
+    }
+    worldGroup.add(branch);
   }
-  worldGroup.add(branch);
 
   // 木造のお店は、集落のなかに1〜2軒だけ置いて主役にしない。
   for (let d = 300; d < totalLength - 120; d += 340 + rng() * 120) {
+    if (isPhotoCurveVista(d)) continue;
     const s = sampleAt(path, d);
     const shop = makeShop(rng);
     const p = s.pos.clone().addScaledVector(s.right, roadHalf + 7.5);
@@ -1406,7 +1529,7 @@ function buildScenery(path, totalLength) {
   for (const village of villages) {
     for (let i = 0; i < village.count; i++) {
       const d = village.at + (rng() - 0.5) * village.spread;
-      if (d < 8 || d > totalLength - 40) continue;
+      if (d < 8 || d > totalLength - 40 || isPhotoCurveVista(d)) continue;
       const s = sampleAt(path, d);
       const house = makeHouse(rng);
       // 道からの距離をばらつかせ、奥行きのある集落にする
@@ -1424,6 +1547,7 @@ function buildScenery(path, totalLength) {
   // 現地写真と同じく、畑は道路右側の斜面へ段々に並べる。
   if (TEX.fantasyTerrace) {
     for (let d = 34; d < totalLength * 0.72; d += 44 + rng() * 18) {
+      if (isPhotoCurveVista(d)) continue;
       const s = sampleAt(path, d);
       const terrace = makeSceneryPlane(TEX.fantasyTerrace, 17 + rng() * 4, 8.2 + rng() * 1.2, 3.2);
       const p = s.pos.clone().addScaledVector(s.right, roadHalf + 13 + rng() * 8);
@@ -1438,6 +1562,7 @@ function buildScenery(path, totalLength) {
     const terraceGeo = new THREE.BoxGeometry(11, 0.38, 13);
     const terraceMat = new THREE.MeshLambertMaterial({ color: 0x8fc45e });
     for (let d = 30; d < totalLength * 0.6; d += 34) {
+      if (isPhotoCurveVista(d)) continue;
       const s = sampleAt(path, d);
       const box = new THREE.Mesh(terraceGeo, terraceMat);
       const p = s.pos.clone().addScaledVector(s.right, roadHalf + 11);
@@ -1539,18 +1664,23 @@ function buildScenery(path, totalLength) {
     worldGroup.add(wall);
   }
 
-  // 海は防波壁の向こうから始まる長方形に変更。円形の海が道路の下へ回り込むのを防ぐ。
+  // 海は道路より低い水平面。出発地点と港の両方を覆う広さにする。
   const seaGroup = new THREE.Group();
   seaGroup.position.copy(end.pos);
   seaGroup.rotation.y = -end.heading;
+  // 海の画像も折り返して連続させ、タイルの端の色差が直線として出るのを防ぐ。
+  const seaMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: true });
+  seaMaterial.userData.seamlessRepeat = true;
+  shadeOcean(seaMaterial);
   const deepSea = new THREE.Mesh(
-    new THREE.PlaneGeometry(8000, 8000),
-    useTex('sea', new THREE.MeshBasicMaterial({ color: 0xffffff, fog: true }), [9, 9])
+    new THREE.PlaneGeometry(16000, 16000),
+    useTex('sea', seaMaterial, [22, 22])
   );
   deepSea.rotation.x = -Math.PI / 2;
   // 遠端をカメラの描画距離より先へ送り、海の板が山形に見える境界をなくす。
-  deepSea.position.set(0, seaY - end.pos.y, -2000);
+  deepSea.position.set(0, seaY - end.pos.y, 0);
   seaGroup.add(deepSea);
+  deepSea.name = 'ocean-surface';
   motionActors.seas.push(deepSea);
   // 海面を2枚重ねると遠景でZ-fighting（ちらつき）が起きるため、
   // 色の変化は模様入りテクスチャ1枚だけで表現する。
@@ -1650,7 +1780,7 @@ function buildScenery(path, totalLength) {
   }
 
   // 雲（コースぞいの空にちらばせる）
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 6; i++) {
     const s = sampleAt(path, rng() * totalLength);
     const cloud = makeCloudCluster(rng);
     const side = rng() < 0.5 ? -1 : 1;
@@ -1658,10 +1788,19 @@ function buildScenery(path, totalLength) {
     const p = s.pos.clone().addScaledVector(s.right, side * (280 + rng() * 360));
     // 坂の標高と一緒に雲まで下げない。海面上の白い塊に見えない高さへ固定する。
     cloud.position.set(p.x, s.pos.y + 180 + rng() * 90, p.z);
-    cloud.scale.setScalar(12 + rng() * 15);
+    cloud.scale.setScalar(24 + rng() * 24);
     worldGroup.add(cloud);
     if (cloud.userData.billboard) billboards.push(cloud);
     rememberMotion(cloud, 'clouds', rng() * Math.PI * 2);
+  }
+
+  // 出発地点から見える大きな夏雲。遠くに置き、道路の視界を空ける。
+  for (const [x,z,y,size] of [[-520,-1120,240,135],[580,-1450,310,170],[-1150,-1800,340,190]]) {
+    const cloud = makeCloudCluster(rng, true);
+    cloud.position.set(x,y,z); cloud.scale.setScalar(size);
+    worldGroup.add(cloud);
+    if (cloud.userData.billboard) billboards.push(cloud);
+    rememberMotion(cloud,'clouds',rng()*6.28);
   }
 
   // ゴールの先にそびえる入道雲
@@ -1696,42 +1835,120 @@ function buildScenery(path, totalLength) {
 
 
 /* ------------------------- 4. プレイヤー ------------------------- */
+// 近景は立体モデルで奥行きを作る。岩と低木は一括描画し、画像の板を増やさない。
+// 海面から盛り上がる島。輪を重ねた地形なので、円すいの尖りを作らない。
+function buildPanoramaIslands(path, length) {
+  const seaY = sampleAt(path, length).pos.y - 1.45;
+  const rng = mulberry32(9132026);
+  const islands = [
+    [-310, -440, 120, 72, 42], [-570, -680, 200, 108, 85],
+    [35, -940, 235, 110, 100], [-780, -1160, 285, 145, 125],
+    [360, -1450, 320, 170, 120], [-310, -1780, 390, 200, 140],
+    [-1270, -1900, 430, 200, 150], [810, -2050, 400, 220, 160],
+  ];
+  for (let n = 0; n < islands.length; n++) {
+    const [x,z,rx,rz,height] = islands[n];
+    const vertices = [], colors = [], indices = [];
+    const rings = 14, slices = 64;
+    const tint = new THREE.Color(n < 3 ? 0x4c8e85 : n < 6 ? 0x81b3ba : 0xa7cad0);
+    const phase = rng() * 6.28;
+    // 陸の端を海面より上に置き、その外周から海中へ垂直な裾を伸ばす。
+    // 広く平たい三角形を海面と交差させないので、波打ち際が点滅しない。
+    for (let r = 0; r <= rings + 1; r++) {
+      const radius = Math.min(r, rings) / rings;
+      const underwater = r > rings;
+      for (let j = 0; j <= slices; j++) {
+        const a = j / slices * Math.PI * 2;
+        const shore = 1 + 0.10*Math.sin(a*3+phase) + 0.06*Math.cos(a*5-phase);
+        const u = Math.cos(a)*radius, v = Math.sin(a)*radius;
+        const peakA = Math.exp(-((u+0.28)**2*7+(v-0.03)**2*4));
+        const peakB = Math.exp(-((u-0.30)**2*10+(v+0.08)**2*7));
+        const h = (peakA*0.66+peakB*0.8) * (1-Math.pow(radius,6)) * height;
+        vertices.push(x+Math.cos(a)*rx*radius*shore, seaY + (underwater ? -6 : 0.8 + h), z+Math.sin(a)*rz*radius*shore);
+        const c = tint.clone().multiplyScalar(0.88+0.16*h/height);
+        if (r >= rings) c.setHex(underwater ? 0x728f85 : 0xc7cfaf);
+        colors.push(c.r,c.g,c.b);
+        if (r <= rings && j < slices) {
+          const i = r*(slices+1)+j;
+          indices.push(i,i+1,i+slices+1, i+1,i+slices+2,i+slices+1);
+        }
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
+    geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+    geo.setIndex(indices); geo.computeVertexNormals();
+    const island = new THREE.Mesh(geo,new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide}));
+    island.name = `panorama-island-${n}`;
+    island.userData.seaLevel = seaY;
+    worldGroup.add(island);
+  }
+}
+
+function buildCoastalModels(path, length) {
+  const rng = mulberry32(9112026);
+  const stoneSpots = [], leafSpots = [];
+  for (let d = 18; d < length - 110; d += 13) {
+    for (const side of [-1, 1]) {
+      const s = sampleAt(path, d + rng() * 5);
+      const p = s.pos.clone().addScaledVector(s.right, side * (CONFIG.roadWidth / 2 + 1.6 + rng() * 1.5));
+      p.y -= 0.06;
+      stoneSpots.push({ p, scale: 0.22 + rng() * 0.35, heading: rng() * Math.PI });
+      // 海が開くカーブでは草丈を低くする。
+      const height = isPhotoCurveVista(d) ? 0.12 : 0.24 + rng() * 0.22;
+      for (let j = 0; j < 3; j++) {
+        const q = p.clone();
+        q.x += (rng() - 0.5) * 0.8;
+        q.z += (rng() - 0.5) * 0.8;
+        leafSpots.push({p:q, height, width:0.25+rng()*0.3});
+      }
+    }
+  }
+  const stones = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1,0),
+    new THREE.MeshStandardMaterial({color:0xffffff,roughness:1}),stoneSpots.length);
+  const leaves = new THREE.InstancedMesh(new THREE.SphereGeometry(1,6,4),
+    new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.95}),leafSpots.length);
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+  stoneSpots.forEach((spot,i)=>{
+    dummy.position.copy(spot.p); dummy.position.y += spot.scale * 0.26;
+    dummy.scale.set(spot.scale,spot.scale*0.48,spot.scale*0.8);
+    dummy.rotation.set(0.1,spot.heading,0.12); dummy.updateMatrix();
+    stones.setMatrixAt(i,dummy.matrix);
+    color.setHSL(0.12,0.08+rng()*0.06,0.34+rng()*0.15); stones.setColorAt(i,color);
+  });
+  leafSpots.forEach((spot,i)=>{
+    dummy.position.copy(spot.p); dummy.position.y += spot.height*0.45;
+    dummy.scale.set(spot.width,spot.height,spot.width*0.8);
+    dummy.rotation.set(0,rng()*Math.PI,0); dummy.updateMatrix();
+    leaves.setMatrixAt(i,dummy.matrix);
+    color.setHSL(0.22+rng()*0.06,0.28+rng()*0.12,0.22+rng()*0.12); leaves.setColorAt(i,color);
+  });
+  stones.instanceMatrix.needsUpdate = leaves.instanceMatrix.needsUpdate = true;
+  worldGroup.add(stones,leaves);
+}
+
 function buildPlayer() {
-  // 直進の2姿勢と軽い荷重を追加。足元をそろえた画像を短い補間で切り替える。
-  // 新しい画像がなくても、従来の中央・左・右画像へ戻れる。
+  // ★画像を消したり重ねたりせず、1枚の人物を連続的に曲げる。
+  // 半透明の姿勢画像を重ねると、切替途中で体が薄くなって点滅して見える。
   if (TEX.skater) {
     const g = new THREE.Group();
-    const poseTextures = {
-      center: TEX.skater,
-      balanceA: TEX.skaterBalanceA || TEX.skater,
-      balanceB: TEX.skaterBalanceB || TEX.skaterBalanceA || TEX.skater,
-      softLeft: TEX.skaterSoftLeft || TEX.skaterLeft || TEX.skater,
-      softRight: TEX.skaterSoftRight || TEX.skaterRight || TEX.skater,
-      left: TEX.skaterSoftLeft || TEX.skaterLeft || TEX.skater,
-      right: TEX.skaterSoftRight || TEX.skaterRight || TEX.skater,
-    };
-    const poseMeshes = {};
-    for (const [pose, texture] of Object.entries(poseTextures)) {
-      const mat = new THREE.MeshBasicMaterial({
-        map: texture,
-        transparent: true,
-        alphaTest: 0.08,
-        opacity: pose === 'center' ? 1 : 0,
-        depthWrite: false,
-      });
-      // 上半身だけを動かせる細分割。車輪付近は固定して浮遊感を防ぐ。
-      const geometry = new THREE.PlaneGeometry(1.9, 2.85, 4, 10);
-      const plane = new THREE.Mesh(geometry, mat);
-      plane.userData.restPositions = geometry.attributes.position.array.slice();
-      plane.userData.weight = pose === 'center' ? 1 : 0;
-      plane.position.y = 1.35;
-      plane.renderOrder = pose === 'center' ? 3 : 4;
-      g.add(plane);
-      poseMeshes[pose] = plane;
-    }
+    const mat = new THREE.MeshBasicMaterial({
+      map: TEX.skaterBalanceA || TEX.skater,
+      transparent: true,
+      opacity: 1,
+      alphaTest: 0.001,
+      depthWrite: false,
+    });
+    const geometry = new THREE.PlaneGeometry(1.9, 2.85, 12, 20);
+    const rider = new THREE.Mesh(geometry, mat);
+    rider.userData.restPositions = geometry.attributes.position.array.slice();
+    rider.position.y = 1.35;
+    rider.renderOrder = 4;
+    rider.frustumCulled = false; // 変形後の肩も表示範囲の端で欠けないようにする。
+    g.add(rider);
     g.userData.spriteMode = true;
-    g.userData.poseMeshes = poseMeshes;
-    g.userData.basePlaneY = 1.35;
+    g.userData.riderMesh = rider;
     scene.add(g);
     return g;
   }
@@ -1963,9 +2180,9 @@ const state = {
   lives: CONFIG.lives,
   xOffset: 0,
   xVel: 0,
+  smoothInput: 0,
+  currentSpeed: 0,
   visualSteer: 0,
-  steerHeldFor: 0,
-  steerDirection: 0,
   balanceClock: 0,
   cameraBank: 0,
   cameraShakeT: 0,
@@ -1975,11 +2192,13 @@ const state = {
   impactFlash: 0,
   invincibleT: 0,
   running: false,
+  paused: false,
   path: null,
   items: [],
 };
 
 let player = buildPlayer();
+const cameraAim = new THREE.Vector3();
 
 /* 世界づくり（重い・0.2秒ちかくかかる）と、走行状態のもどし（軽い）を分ける。
    同じ坂を何周でも走るので、2周目からは世界を作りなおさなくてよい。       */
@@ -1997,7 +2216,10 @@ function buildWorld() {
   state.path = buildPath(course);
   state.totalLength = (state.path.length - 1) * DL;
   buildScenery(state.path, state.totalLength);
-  state.items = spawnItems(state.path, state.totalLength, 1);
+  buildCoastalModels(state.path, state.totalLength);
+  buildPanoramaIslands(state.path, state.totalLength);
+  // 障害物を置かず、海へ落ちる坂と大きな右カーブの動きを主役にする。
+  state.items = [];
   worldBuilt = true;
 }
 
@@ -2006,9 +2228,10 @@ function resetRun() {
   state.distance = 0;
   state.xOffset = 0;
   state.xVel = 0;
+  state.smoothInput = 0;
+  state.currentSpeed = 0;
+  resetInput();
   state.visualSteer = 0;
-  state.steerHeldFor = 0;
-  state.steerDirection = 0;
   state.balanceClock = 0;
   state.cameraBank = 0;
   state.cameraShakeT = 0;
@@ -2016,14 +2239,17 @@ function resetRun() {
   state.impactFlash = 0;
   state.lives = CONFIG.lives;
   state.invincibleT = 0;
+  state.paused = false;
 
   // リトライ時に前のゴール地点から長く補間しないよう、カメラも即座に戻す。
-  const startCam = sampleAt(state.path, 0).pos.clone();
-  startCam.y += CONFIG.cameraHeight;
+  const start = sampleAt(state.path, 0);
+  const startCam = start.pos.clone().addScaledVector(start.forward, -CONFIG.cameraBack);
+  startCam.y += CONFIG.cameraHeight + start.grade * CONFIG.cameraBack;
   camera.position.copy(startCam);
   const startLook = sampleAt(state.path, CONFIG.cameraLookAhead).pos.clone();
   startLook.y += CONFIG.cameraLookLift;
-  camera.lookAt(startLook);
+  cameraAim.copy(startLook);
+  camera.lookAt(cameraAim);
   camera.fov = 62;
   camera.updateProjectionMatrix();
   skyDome.position.copy(camera.position);
@@ -2044,7 +2270,7 @@ function startLevel(level) {
    スタート地点へワープしたように見える。                              */
 function rebuildLevel() {
   const keep = {
-    distance: state.distance, lives: state.lives, running: state.running,
+    distance: state.distance, lives: state.lives, running: state.running, paused: state.paused,
     xOffset: state.xOffset, xVel: state.xVel, visualSteer: state.visualSteer,
     cameraBank: state.cameraBank, crest: state.crest, invincibleT: state.invincibleT,
     impactFlash: state.impactFlash, cameraShakeT: state.cameraShakeT,
@@ -2070,6 +2296,7 @@ function rebuildLevel() {
 /* ------------------------- 7. HUD ------------------------- */
 function renderLives() {
   const box = document.getElementById('livesBox');
+  if (!box) return;
   box.innerHTML = '';
   for (let i = 0; i < CONFIG.lives; i++) {
     const span = document.createElement('span');
@@ -2081,6 +2308,8 @@ function renderLives() {
 function updateHUD() {
   const pct = Math.min(100, (state.distance / state.totalLength) * 100);
   document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('speedValue').textContent = Math.round(state.currentSpeed);
+  document.getElementById('distanceValue').textContent = Math.max(0, Math.round(state.totalLength - state.distance));
 }
 
 
@@ -2178,7 +2407,7 @@ function updateSound(s) {
   if (!sound.ctx || !sound.windGain) return;
   const t = sound.ctx.currentTime;
   // 坂がきついほど速く感じるので、勾配も音に混ぜる
-  const speedT = state.running ? THREE.MathUtils.clamp(0.45 + s.grade * 1.1, 0, 1.2) : 0;
+  const speedT = state.running && !state.paused ? THREE.MathUtils.clamp(0.45 + s.grade * 1.1, 0, 1.2) : 0;
   sound.windGain.gain.setTargetAtTime(0.17 * speedT, t, 0.25);
   sound.windFilter.frequency.setTargetAtTime(540 + 520 * speedT, t, 0.3);
   sound.rollGain.gain.setTargetAtTime(0.3 * speedT, t, 0.2);
@@ -2231,6 +2460,7 @@ function setSoundOn(on) {
 
 /* ------------------------- 8. ゲームループ ------------------------- */
 const clock = new THREE.Clock();
+let animationTime = 0;
 
 function updateWind(dt) {
   const positions = wind.geometry.attributes.position.array;
@@ -2272,12 +2502,9 @@ function updateSceneryMotion(time, dt) {
   for (const cloud of motionActors.clouds) {
     cloud.position.x = cloud.userData.motionBaseX + Math.sin(time * 0.08 + cloud.userData.motionPhase) * 2.2;
   }
-  for (const sea of motionActors.seas) {
-    const map = sea.material.map;
-    if (!map) continue;
-    map.offset.x = (map.offset.x + dt * 0.006) % 1;
-    map.offset.y = (map.offset.y + dt * 0.003) % 1;
-  }
+  // 海面画像は世界に固定する。時間による光の変化だけを shadeOcean で描く。
+  // 画像全体を流すと、岸まで滑って動くように見えてしまう。
+
 }
 
 function updateBursts(dt) {
@@ -2311,44 +2538,33 @@ function updateScreenFeedback(dt) {
 
 function updateSpritePose(time, dt) {
   if (!player.userData.spriteMode) return;
-  const meshes = player.userData.poseMeshes;
+  const mesh = player.userData.riderMesh;
   if (state.running) state.balanceClock += dt;
-  const direction = Math.sign(input.steer);
-  state.steerHeldFor = direction && direction === state.steerDirection ? state.steerHeldFor + dt : 0;
-  state.steerDirection = direction;
   const phase = state.balanceClock * Math.PI * 2 / CONFIG.balancePeriod;
-  const neutral = Math.abs(state.visualSteer) < 0.075;
-  const gentle = state.steerHeldFor < CONFIG.softSteerTime || Math.abs(state.visualSteer) < 0.65;
-  const activePose = !state.running ? 'balanceA' : neutral
-    ? (reduceMotion || Math.sin(phase) < 0 ? 'balanceA' : 'balanceB')
-    : state.visualSteer < 0 ? (gentle ? 'softLeft' : 'left') : (gentle ? 'softRight' : 'right');
-  player.userData.activePose = activePose;
-  const sway = reduceMotion ? 0 : Math.sin(phase) * CONFIG.balanceSway * (neutral ? 1 : 0.25);
+  const steer = THREE.MathUtils.clamp(state.visualSteer, -1, 1);
+  const sway = reduceMotion ? 0 : Math.sin(phase) * CONFIG.balanceSway * (1 - Math.abs(steer) * 0.75);
   const breath = reduceMotion ? 0 : Math.sin(phase * 2) * 0.007;
-  const bob = state.running && !reduceMotion ? Math.sin(time * 15) * 0.009 : 0;
-  const blend = 1 - Math.exp(-dt * 3 / CONFIG.poseBlendTime);
-  for (const [pose, mesh] of Object.entries(meshes)) {
-    mesh.userData.weight += ((pose === activePose ? 1 : 0) - mesh.userData.weight) * blend;
-    mesh.visible = mesh.userData.weight > 0.015;
-    mesh.material.opacity = mesh.userData.weight;
-    mesh.position.y = player.userData.basePlaneY + bob;
-    if (!mesh.visible) continue;
-    const hardLean = pose === 'left' ? -0.13 : pose === 'right' ? 0.13 : 0;
-    const positions = mesh.geometry.attributes.position;
-    const rest = mesh.userData.restPositions;
-    for (let i = 0; i < positions.count; i++) {
-      const height = (rest[i * 3 + 1] + 1.425) / 2.85;
-      const upper = height * height;
-      positions.setXYZ(i, rest[i*3] + (sway + hardLean) * upper,
-        rest[i*3+1] + breath * upper - Math.abs(hardLean) * 0.36 * height, rest[i*3+2]);
-    }
-    positions.needsUpdate = true;
+  const positions = mesh.geometry.attributes.position;
+  const rest = mesh.userData.restPositions;
+  for (let i = 0; i < positions.count; i++) {
+    const x = rest[i * 3], y = rest[i * 3 + 1], z = rest[i * 3 + 2];
+    const height = (y + 1.425) / 2.85;
+    // 下の18%（車輪・足元）は固定。腰から肩へ徐々に重心を移す。
+    const upper = THREE.MathUtils.smoothstep(height, 0.18, 1);
+    const lean = steer * CONFIG.riderLean + sway;
+    positions.setXYZ(i,
+      x + lean * upper,
+      y + (breath - Math.abs(steer) * 0.035) * upper,
+      z + Math.abs(steer) * 0.035 * upper);
   }
+  positions.needsUpdate = true;
 }
 
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
+  const activeDt = state.paused ? 0 : dt;
+  animationTime += activeDt;
 
   applyPendingRebuilds();
 
@@ -2374,42 +2590,23 @@ function animate() {
     }
   }
 
-  const time = performance.now() * 0.001;
+  const time = animationTime;
+  oceanTime.value = time;
 
-  updateSceneryMotion(time, dt);
-  updateWind(dt);
-  updateBursts(dt);
-  updateScreenFeedback(dt);
+  if (!reduceMotion) updateSceneryMotion(time, activeDt);
+  updateWind(activeDt);
+  updateBursts(activeDt);
+  updateScreenFeedback(activeDt);
 
   // 操作そのものより少しだけ遅れて体が倒れこむ。
-  const poseBlend = 1 - Math.exp(-dt / CONFIG.poseBlendTime);
-  state.visualSteer += (input.steer - state.visualSteer) * poseBlend;
+  const poseBlend = 1 - Math.exp(-activeDt / CONFIG.poseBlendTime);
+  state.visualSteer += (state.smoothInput - state.visualSteer) * poseBlend;
 
-  if (state.running) {
-    state.distance = Math.min(state.totalLength, state.distance + CONFIG.speed * state.speedScale * dt);
-    if (state.invincibleT > 0) state.invincibleT -= dt;
+  if (state.running && !state.paused) {
+    // 1秒を最大120回に分け、30 / 60 / 120fpsでも同じ操作感にする。
+    RidePhysics.advance(state, input, CONFIG, activeDt);
+    if (state.invincibleT > 0) state.invincibleT -= activeDt;
 
-    // 60fps以外でも同じ手ざわりになる時間ベースの摩擦。
-    state.xVel *= Math.pow(CONFIG.steerFriction, dt * 60);
-    state.xVel += input.steer * CONFIG.steerAccel * dt;
-    state.xVel = THREE.MathUtils.clamp(state.xVel, -CONFIG.steerMax, CONFIG.steerMax);
-    state.xOffset += state.xVel * dt;
-    const half = CONFIG.roadWidth / 2 - 0.4;
-    const edgeStart = half - CONFIG.edgeSoftZone;
-    if (Math.abs(state.xOffset) > edgeStart) {
-      const side = Math.sign(state.xOffset);
-      const edgeAmount = Math.abs(state.xOffset) - edgeStart;
-      state.xVel -= side * edgeAmount * CONFIG.edgeSpring * dt;
-      state.xVel *= Math.pow(CONFIG.edgeDamping, dt * 60);
-    }
-    if (Math.abs(state.xOffset) > half) {
-      const side = Math.sign(state.xOffset);
-      state.xOffset = side * half;
-      state.xVel = -side * Math.min(4, Math.abs(state.xVel) * CONFIG.edgeBounce);
-      state.cameraShakeT = Math.max(state.cameraShakeT, 0.08);
-    }
-
-    checkCollisions();
     updateHUD();
 
     if (state.distance >= state.totalLength) {
@@ -2421,9 +2618,15 @@ function animate() {
   const s = sampleAt(state.path, state.distance);
   const p = s.pos.clone().addScaledVector(s.right, state.xOffset);
   player.position.set(p.x, p.y, p.z);
-  updateSpritePose(time, dt);
+  contactShadow.position.copy(p);
+  contactShadow.position.y += 0.075;
+  contactShadow.rotation.order = 'YXZ';
+  contactShadow.rotation.y = -s.heading;
+  contactShadow.rotation.x = -Math.PI / 2 - s.pitch;
+  contactShadow.material.uniforms.strength.value = state.running ? 0.28 : 0.22;
+  updateSpritePose(time, activeDt);
   if (player.userData.spriteMode) {
-    // 3姿勢の切り替えに、ごく小さなロールを足して入力との一体感を出す。
+    // 1枚の人物の傾きに、ごく小さなロールを足して操作と連動させる。
     player.quaternion.copy(camera.quaternion);
     player.rotateZ(-state.visualSteer * 0.035 + state.xVel * 0.0025);
   } else {
@@ -2440,23 +2643,34 @@ function animate() {
   // うねりで判定すると 230 ユニットごとに中途半端に発火して、意味が伝わらない。
   const aheadCourse = sampleAt(state.path, state.distance + 40).courseGrade;
   const crestTarget = THREE.MathUtils.clamp((aheadCourse - s.courseGrade) * 9, 0, 1);
-  state.crest += (crestTarget - state.crest) * (1 - Math.exp(-dt * 4));
+  state.crest += (crestTarget - state.crest) * (1 - Math.exp(-activeDt * 4));
 
   // カメラ追従
   const arrival = THREE.MathUtils.smoothstep(state.distance, state.totalLength - 65, state.totalLength);
+  const heroCurve = bigCurves.find(curve => curve.photoCurve);
+  const previewIn = heroCurve
+    ? THREE.MathUtils.smoothstep(state.distance, Math.max(0, heroCurve.start - 140), heroCurve.start - 30)
+    : 0;
+  const previewOut = heroCurve
+    ? THREE.MathUtils.smoothstep(state.distance, heroCurve.end - 10, heroCurve.end + 65)
+    : 1;
+  const curvePreview = previewIn * (1 - previewOut);
   const cameraBack = THREE.MathUtils.lerp(CONFIG.cameraBack, 9, arrival);
-  const camS = sampleAt(state.path, state.distance - cameraBack);
-  const camPos = camS.pos.clone().addScaledVector(camS.right, state.xOffset * 0.6);
-  camPos.y += THREE.MathUtils.lerp(CONFIG.cameraHeight, 4.2, arrival) + state.crest * CONFIG.crestLift;
+  const cameraDistance = state.distance - cameraBack + state.currentSpeed * CONFIG.cameraResponse;
+  const camS = sampleAt(state.path, cameraDistance);
+  const camPos = camS.pos.clone().addScaledVector(camS.right, state.xOffset * 0.45);
+  camPos.y += THREE.MathUtils.lerp(CONFIG.cameraHeight, 4.2, arrival)
+    + state.crest * CONFIG.crestLift + curvePreview * 0.4;
   const rideShake = state.running && !reduceMotion ? CONFIG.cameraShake : 0;
-  if (state.cameraShakeT > 0) state.cameraShakeT = Math.max(0, state.cameraShakeT - dt);
+  if (state.cameraShakeT > 0) state.cameraShakeT = Math.max(0, state.cameraShakeT - activeDt);
   const hitRatio = CONFIG.hitShake > 0 ? state.cameraShakeT / CONFIG.hitShake : 0;
-  const shake = rideShake + hitRatio * 0.28;
+  const shake = reduceMotion ? 0 : rideShake + hitRatio * 0.12;
   camPos.x += Math.sin(time * 36) * shake;
   camPos.y += Math.sin(time * 47 + 1.3) * shake * 0.55;
   camPos.z += Math.sin(time * 41 + 0.5) * shake * 0.45;
-  camera.position.lerp(camPos, 1 - Math.pow(0.001, dt));
-  const lookAheadS = sampleHarborAt(state.path, state.distance + CONFIG.cameraLookAhead + state.crest * CONFIG.crestLookAhead);
+  camera.position.lerp(camPos, 1 - Math.exp(-activeDt / CONFIG.cameraResponse));
+  const lookAheadS = sampleHarborAt(state.path, state.distance + state.currentSpeed * CONFIG.cameraResponse + CONFIG.cameraLookAhead
+    + state.crest * CONFIG.crestLookAhead + curvePreview * 10);
   const lookAhead = lookAheadS.pos.clone().addScaledVector(lookAheadS.right, state.xOffset * 0.3);
   // 道路より少し水平寄りを見ると、前方へ落ちていく坂の傾斜が伝わる。
   // 縦画面（スマホ）は そのままだと画面の6割が路面になるので、さらに上を見る。
@@ -2464,62 +2678,101 @@ function animate() {
     ? THREE.MathUtils.lerp(1, 1.75, THREE.MathUtils.clamp((1 - camera.aspect) / 0.45, 0, 1))
     : 1;
   lookAhead.y += THREE.MathUtils.lerp(CONFIG.cameraLookLift, 3.2, arrival) * portraitLift;
-  camera.lookAt(lookAhead);
+  cameraAim.lerp(lookAhead, 1 - Math.exp(-activeDt / CONFIG.cameraResponse));
+  camera.lookAt(cameraAim);
   const curveBank = THREE.MathUtils.clamp((lookAheadS.heading - s.heading) * 2.5, -1, 1);
-  const targetBank = -state.visualSteer * CONFIG.cameraBank - curveBank * 0.025;
-  state.cameraBank += (targetBank - state.cameraBank) * (1 - Math.exp(-dt * 7));
+  const targetBank = reduceMotion ? 0 : -state.visualSteer * CONFIG.cameraBank - curveBank * CONFIG.routeBank;
+  state.cameraBank += (targetBank - state.cameraBank) * (1 - Math.exp(-activeDt * 7));
   camera.rotateZ(state.cameraBank);
   // 急な下りほど画角をひろげ、落ちていく加速感を出す。
   const steepT = THREE.MathUtils.clamp((s.grade - CONFIG.slopeRate) / 0.22, 0, 1);
-  const targetFov = 62 + (state.running ? CONFIG.cameraFovBoost + steepT * CONFIG.steepFovBoost : 0);
-  camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-dt * 3.5));
+  const targetFov = 62 + (state.running && !reduceMotion
+    ? CONFIG.cameraFovBoost + steepT * CONFIG.steepFovBoost
+      + Math.abs(curveBank) * 0.8 + curvePreview
+    : 0);
+  camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-activeDt * 3.5));
   camera.updateProjectionMatrix();
 
   // 空のドームはカメラについてこさせる。原点に置いたままだと、
   // コースを 500 下ったころには 描かれた水平線が 17度も浮きあがってしまう。
   skyDome.position.copy(camera.position);
 
+  if (player.userData.spriteMode) {
+    player.quaternion.copy(camera.quaternion);
+    player.rotateZ(-state.visualSteer * 0.035 + state.xVel * 0.0025);
+  }
   updateSound(s);
   renderer.render(scene, camera);
 }
 
 
 /* ------------------------- 9. 入力 ------------------------- */
-const input = { steer: 0 };
+const input = { steer: 0, brake: false };
 const keys = new Set();
+const pointerControls = new Map();
+let canvasPointer = null;
+let pointerSteer = 0;
 
-window.addEventListener('keydown', e => {
-  if (e.key.startsWith('Arrow')) e.preventDefault();
-  keys.add(e.key);
-  updateSteerFromKeys();
-});
-window.addEventListener('keyup', e => {
-  keys.delete(e.key);
-  updateSteerFromKeys();
-});
-function updateSteerFromKeys() {
-  let s = 0;
-  if (keys.has('ArrowLeft') || keys.has('a') || keys.has('A')) s -= 1;
-  if (keys.has('ArrowRight') || keys.has('d') || keys.has('D')) s += 1;
-  input.steer = s;
-  // 押した瞬間に左右画像へ切り替え、離したあとの中央復帰だけを滑らかにする。
-  if (s !== 0) state.visualSteer = s;
+function updateInput() {
+  let steer = 0;
+  if (keys.has('ArrowLeft') || keys.has('KeyA')) steer -= 1;
+  if (keys.has('ArrowRight') || keys.has('KeyD')) steer += 1;
+  for (const action of pointerControls.values()) {
+    if (action === 'left') steer -= 1;
+    if (action === 'right') steer += 1;
+  }
+  input.steer = state.running && !state.paused ? THREE.MathUtils.clamp(steer + pointerSteer, -1, 1) : 0;
+  input.brake = state.running && !state.paused && (keys.has('ArrowDown') || keys.has('KeyS') || [...pointerControls.values()].includes('brake'));
 }
-
-let touchSide = 0;
-renderer.domElement.addEventListener('pointerdown', e => {
-  renderer.domElement.setPointerCapture(e.pointerId);
-  touchSide = e.clientX < innerWidth / 2 ? -1 : 1;
-  input.steer = touchSide;
-  state.visualSteer = touchSide;
+function resetInput() {
+  keys.clear(); pointerControls.clear(); canvasPointer = null; pointerSteer = 0;
+  input.steer = 0; input.brake = false;
+  for (const button of document.querySelectorAll('[data-control]')) button.classList.remove('pressed');
+}
+window.addEventListener('keydown', e => {
+  if (e.target.closest('input, select, textarea, button, a')) return;
+  if (e.code === 'Space' || e.code === 'Escape') {
+    e.preventDefault(); if (!e.repeat) togglePause(); return;
+  }
+  if (!['ArrowLeft','ArrowRight','ArrowDown','KeyA','KeyD','KeyS'].includes(e.code)) return;
+  e.preventDefault(); keys.add(e.code); updateInput();
 });
-renderer.domElement.addEventListener('pointerup', () => { input.steer = 0; });
-renderer.domElement.addEventListener('pointercancel', () => { input.steer = 0; });
-window.addEventListener('blur', () => {
-  keys.clear();
-  input.steer = 0;
+window.addEventListener('keyup', e => { keys.delete(e.code); updateInput(); });
+const canvas = renderer.domElement;
+canvas.addEventListener('pointerdown', e => {
+  if (!state.running || state.paused || canvasPointer !== null || e.button !== 0) return;
+  canvasPointer = e.pointerId;
+  canvas.setPointerCapture(e.pointerId);
+  pointerSteer = e.clientX < innerWidth / 2 ? -0.65 : 0.65;
+  updateInput();
 });
-
+canvas.addEventListener('pointermove', e => {
+  if (e.pointerId !== canvasPointer) return;
+  const position = (e.clientX / innerWidth - 0.5) * 2;
+  pointerSteer = Math.abs(position) < 0.08 ? 0 : THREE.MathUtils.clamp(position / 0.7, -1, 1);
+  updateInput();
+});
+function releaseCanvas(e) {
+  if (e.pointerId !== canvasPointer) return;
+  canvasPointer = null; pointerSteer = 0; updateInput();
+}
+for (const event of ['pointerup','pointercancel','lostpointercapture']) canvas.addEventListener(event, releaseCanvas);
+for (const button of document.querySelectorAll('[data-control]')) {
+  button.addEventListener('pointerdown', e => {
+    if (!state.running || state.paused || e.button !== 0) return;
+    e.preventDefault(); button.setPointerCapture(e.pointerId);
+    pointerControls.set(e.pointerId, button.dataset.control); button.classList.add('pressed'); updateInput();
+  });
+  for (const event of ['pointerup','pointercancel','lostpointercapture']) button.addEventListener(event, e => {
+    pointerControls.delete(e.pointerId); button.classList.remove('pressed'); updateInput();
+  });
+}
+function pauseWhenAway() {
+  resetInput();
+  if (state.running && !state.paused) togglePause();
+}
+window.addEventListener('blur', pauseWhenAway);
+document.addEventListener('visibilitychange', () => { if (document.hidden) pauseWhenAway(); });
 
 /* ------------------------- 画面遷移 ------------------------- */
 function showOverlay(id) {
@@ -2527,10 +2780,21 @@ function showOverlay(id) {
   document.getElementById(id).classList.remove('hidden');
 }
 
+function togglePause() {
+  if (!document.getElementById('labPanel').classList.contains('hidden')) return;
+  if (!state.running) return;
+  state.paused = !state.paused;
+  resetInput();
+  document.getElementById('pauseScreen').classList.toggle('hidden', !state.paused);
+  // 復帰した最初のフレームに、停止中の時間をまとめて加算しない。
+  if (!state.paused) { clock.getDelta(); document.activeElement?.blur(); }
+}
+
 function endGame(cleared) {
   state.running = false;
-  input.steer = 0;
-  keys.clear();
+  state.paused = false;
+  document.getElementById('pauseScreen').classList.add('hidden');
+  resetInput();
   if (cleared) {
     playChime();
     document.getElementById('clearLap').textContent = state.lap;
@@ -2543,11 +2807,13 @@ function endGame(cleared) {
 // 何周でも同じ坂を走る。周をかさねると すこしだけ速くなる。
 function runLap(nextLap) {
   state.lap = nextLap;
-  state.speedScale = 1 + Math.min(0.45, (nextLap - 1) * 0.08);
+  state.speedScale = 1 + Math.min(CONFIG.lapSpeedMax, (nextLap - 1) * CONFIG.lapSpeedGain);
   if (!worldBuilt) buildWorld();
   resetRun();
+  document.getElementById('pauseScreen').classList.add('hidden');
   startSound();
   state.running = true;
+  document.activeElement?.blur();
 }
 
 /* スタートを待たせるしくみ。
@@ -2584,6 +2850,7 @@ startBtn.addEventListener('click', () => {
   if (!startReady) return;
   runLap(1);
   document.getElementById('startScreen').classList.add('hidden');
+  startBtn.blur();
 });
 document.getElementById('retryBtn').addEventListener('click', () => {
   runLap(state.lap);
@@ -2593,6 +2860,45 @@ document.getElementById('nextBtn').addEventListener('click', () => {
   runLap(state.lap + 1);
   document.getElementById('clearScreen').classList.add('hidden');
 });
+document.getElementById('resumeBtn').addEventListener('click', togglePause);
+document.getElementById('pauseBtn').addEventListener('click', togglePause);
+
+const labPanel = document.getElementById('labPanel');
+const labDefaults = { speed: CONFIG.speed, steerAccel: CONFIG.steerAccel, cameraShake: CONFIG.cameraShake };
+let labWasPaused = false;
+function syncLab() {
+  for (const slider of labPanel.querySelectorAll('input[data-setting]')) {
+    const key = slider.dataset.setting;
+    slider.value = CONFIG[key];
+    document.getElementById(key + 'Output').textContent = CONFIG[key];
+  }
+  document.getElementById('labCode').textContent = `speed: ${CONFIG.speed},\nsteerAccel: ${CONFIG.steerAccel},\ncameraShake: ${CONFIG.cameraShake},`;
+}
+document.getElementById('labBtn').addEventListener('click', () => {
+  labWasPaused = state.paused;
+  state.paused = true; resetInput(); syncLab();
+  labPanel.classList.remove('hidden');
+  document.getElementById('labClose').focus();
+});
+function closeLab() {
+  labPanel.classList.add('hidden'); state.paused = labWasPaused;
+  resetInput(); clock.getDelta();
+  if (state.running && !state.paused) document.activeElement?.blur();
+  else document.getElementById('labBtn').focus();
+}
+document.getElementById('labClose').addEventListener('click', closeLab);
+labPanel.addEventListener('keydown', e => {
+  if (e.code === 'Escape') { e.preventDefault(); e.stopPropagation(); closeLab(); }
+  if (e.code === 'Tab') {
+    const items = [...labPanel.querySelectorAll('button, input, a')];
+    if (e.shiftKey && document.activeElement === items[0]) { e.preventDefault(); items.at(-1).focus(); }
+    else if (!e.shiftKey && document.activeElement === items.at(-1)) { e.preventDefault(); items[0].focus(); }
+  }
+});
+for (const slider of labPanel.querySelectorAll('input[data-setting]')) slider.addEventListener('input', () => {
+  CONFIG[slider.dataset.setting] = Number(slider.value); syncLab();
+});
+document.getElementById('labReset').addEventListener('click', () => { Object.assign(CONFIG, labDefaults); syncLab(); });
 
 // 起動直後は道だけ見せておく
 buildWorld();
