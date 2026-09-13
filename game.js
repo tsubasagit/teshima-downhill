@@ -86,16 +86,16 @@ function makeSkyTexture() {
   c.width = 2; c.height = 512;
   const ctx = c.getContext('2d');
   const grad = ctx.createLinearGradient(0, 0, 0, 512);
-  grad.addColorStop(0, '#1d63c8');
-  grad.addColorStop(0.55, '#4fa8e8');
-  grad.addColorStop(1, '#cfeef7');
+  grad.addColorStop(0, '#1288ec');
+  grad.addColorStop(0.55, '#61c6ff');
+  grad.addColorStop(1, '#ddf7ff');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 2, 512);
   return new THREE.CanvasTexture(c);
 }
 scene.background = makeSkyTexture();
 // 空のグラデーションと霧を同じ水色へ寄せ、水平線の境界をなじませる。
-scene.fog = new THREE.Fog(0xc0e3e8, 450, 3600);
+scene.fog = new THREE.Fog(0xd2eef7, 520, 3600);
 
 // 近すぎる描画面（0.1）は遠い海岸の奥行き精度を浪費する。
 // 手前2ユニットには景色を置かず、海と岸の前後判定を安定させる。
@@ -116,8 +116,8 @@ window.addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x58b04c, 0.5));
-const sun = new THREE.DirectionalLight(0xffffff, 0.42);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x58b04c, 0.62));
+const sun = new THREE.DirectionalLight(0xfff8df, 0.52);
 sun.position.set(80, 140, 60);
 scene.add(sun);
 
@@ -445,10 +445,10 @@ const skyDome = new THREE.Mesh(
       void main() {
         vec3 direction = normalize(skyDirection);
         float height = pow(max(direction.y,0.0),0.55);
-        vec3 color = mix(vec3(0.75,0.89,0.91),vec3(0.22,0.57,0.79),height);
+        vec3 color = mix(vec3(0.84,0.95,0.99),vec3(0.07,0.52,0.92),height);
         float sun = pow(max(dot(direction,normalize(vec3(-0.55,0.48,-0.7))),0.0),240.0);
         float glow = pow(max(dot(direction,normalize(vec3(-0.55,0.48,-0.7))),0.0),12.0);
-        color += vec3(0.28,0.23,0.12)*glow + vec3(0.4,0.34,0.2)*sun;
+        color += vec3(0.22,0.20,0.12)*glow + vec3(0.38,0.34,0.22)*sun;
         gl_FragColor = vec4(color,1.0);
       }`
   })
@@ -537,6 +537,13 @@ function seaVistaDrop(d, offset) {
   const coastal = 1 - THREE.MathUtils.smoothstep(d, length - 320, length - 180);
   const lateral = THREE.MathUtils.smoothstep(Math.abs(offset), CONFIG.roadWidth / 2 + 1.2, CONFIG.roadWidth / 2 + 58);
   return -CONFIG.coastDrop * coastal * lateral;
+}
+
+// 港の手前は道が大きく曲がるため、カメラを向く板状の草木を置くと
+// 海の上へ回り込んで見える。残り約250〜400mは視界を開けておく。
+function isHarborVistaClear(distance, totalLength) {
+  const remaining = totalLength - distance;
+  return remaining >= 250 && remaining <= 400;
 }
 
 // 葉先のアルファは残し、画像矩形の端と根元だけをフェードさせる。
@@ -1134,7 +1141,8 @@ function buildPaintedLandmarks(path, totalLength) {
   const rng = mulberry32(8282026);
   const half = CONFIG.roadWidth / 2;
   function place(texture, width, d, side, offset, lift = 0, moves = false) {
-    if (!texture || d < 0 || d > totalLength || isPhotoCurveVista(d) || (side < 0 && d < totalLength - 260)) return;
+    if (!texture || d < 0 || d > totalLength || isPhotoCurveVista(d)
+      || isHarborVistaClear(d, totalLength) || (side < 0 && d < totalLength - 260)) return;
     const s = sampleAt(path, d);
     const prop = makePaintedProp(texture, width);
     const scale = 0.9 + rng() * 0.16;
@@ -1426,7 +1434,7 @@ function buildScenery(path, totalLength) {
 
   // 木（右の段の上にランダムに）
   for (let d = 12; d < totalLength; d += 16 + rng() * 14) {
-    if (isPhotoCurveVista(d)) continue;
+    if (isPhotoCurveVista(d) || isHarborVistaClear(d, totalLength)) continue;
     const s = sampleAt(path, d);
     const tree = makeTree(rng);
     const p = s.pos.clone().addScaledVector(s.right, roadHalf + 5 + rng() * 18);
@@ -1440,7 +1448,7 @@ function buildScenery(path, totalLength) {
   // 幻想的な草むらを両側へ重ね、平らな緑の帯に奥行きと光を足す。
   if (TEX.fantasyGrass) {
     for (let d = 7; d < totalLength; d += 8 + rng() * 7) {
-      if (isPhotoCurveVista(d, 85, 45)) continue;
+      if (isPhotoCurveVista(d, 85, 45) || isHarborVistaClear(d, totalLength)) continue;
       const s = sampleAt(path, d);
       for (const side of [-1, 1]) {
         if (side < 0 && d < totalLength - 260) continue;
@@ -1471,7 +1479,7 @@ function buildScenery(path, totalLength) {
   for (const layer of layeredScenery) {
     if (!layer.texture) continue;
     for (let d = 105 + rng() * 20; d < totalLength - 95; d += layer.step + rng() * layer.step * 0.35) {
-      if (isPhotoCurveVista(d)) continue;
+      if (isPhotoCurveVista(d) || isHarborVistaClear(d, totalLength)) continue;
       const s = sampleAt(path, d);
       for (const side of [-1, 1]) {
         if (side < 0 && d < totalLength - 260) continue;

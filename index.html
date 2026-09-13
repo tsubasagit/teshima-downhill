@@ -39,7 +39,7 @@
     <span id="progressLabel">レベル 1</span>
     <span id="progressFlag">🏁</span>
   </div>
-  <button id="labBtn" type="button" aria-haspopup="dialog">改造ラボ</button>
+  <button id="labBtn" type="button" aria-haspopup="dialog">設定</button>
   <button id="pauseBtn" type="button" aria-label="一時停止／再開">Ⅱ</button>
   <button id="soundBtn" type="button" aria-label="音を消す">🔊</button>
 </div>
@@ -56,7 +56,7 @@
 </div>
 <div id="labPanel" class="hidden" role="dialog" aria-modal="true" aria-labelledby="labTitle">
   <div class="labCard">
-    <div class="labHeading"><span class="eyebrow">CODERDOJO / PLAY & LEARN</span><button id="labClose" type="button" aria-label="改造ラボを閉じる">閉じる ×</button></div>
+    <div class="labHeading"><span class="eyebrow">SETTINGS / PLAY & LEARN</span><button id="labClose" type="button" aria-label="設定を閉じる">閉じる ×</button></div>
     <h2 id="labTitle">数字ひとつで、走りが変わる。</h2>
     <p>予想して、変えて、走ってみよう。開いている間は一時停止します。</p>
     <label for="speedSlider">前に進む速さ <output id="speedOutput">36</output></label>
@@ -72,7 +72,7 @@
 steerAccel: 75,
 cameraShake: 0,</pre>
     <p class="labNote">ここでの実験は更新すると元に戻ります。残したい数字は <code>settings.js</code> の同じ名前の行に書いて、保存しよう。</p>
-    <div class="labActions"><button id="labReset" type="button">元の数字に戻す</button><a href="docs/CODERDOJO.md" target="_blank" rel="noopener">教材を読む ↗</a></div>
+    <div class="labActions"><button id="labReset" type="button">元の数字に戻す</button><a href="docs/CODERDOJO.md" target="_blank" rel="noopener">設定のしくみを読む ↗</a></div>
   </div>
 </div>
 
@@ -83,7 +83,7 @@ cameraShake: 0,</pre>
   <p>島々を見おろす坂道。潮風を感じながら、港へ。<br>← → / A D で曲がる・↓ / S でブレーキ。<br>スマホは左右を長押し、または指をすべらせて操作。<br>スペースで一時停止。自分のペースで走ろう。</p>
   <button id="startBtn">🛹 タップしてスタート</button>
   <p class="hint">はじめの1回だけ、けしきの絵をよみこみます。</p>
-  <a class="lessonLink" href="docs/CODERDOJO.md" target="_blank" rel="noopener">CoderDojo：数字を変えて、自分の坂道に ↗</a>
+  <a class="lessonLink" href="docs/CODERDOJO.md" target="_blank" rel="noopener">設定を変えて、自分の坂道に ↗</a>
 </div>
 
 <div id="pauseScreen" class="overlay hidden">
@@ -127,7 +127,7 @@ cameraShake: 0,</pre>
     function loadNext() {
       if (!files.length) return;
       const script = document.createElement('script');
-      script.src = files.shift() + '?v=20260913-stable-coast-v4';
+      script.src = files.shift() + '?v=20260913-harbor-vista-v5';
       script.onload = loadNext;
       script.onerror = () => {
         document.querySelector('#startScreen p').textContent = 'ゲームのファイルを読み込めませんでした。ページを更新してください。';
