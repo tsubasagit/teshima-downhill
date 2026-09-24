@@ -122,12 +122,12 @@ cameraShake: 0,</pre>
   const threeScript = document.createElement('script');
   threeScript.src = 'https://unpkg.com/three@0.128.0/build/three.min.js';
   threeScript.onload = () => {
-    // 設定 → 動きの計算 → 描画 の順番で読みこむ。
-    const files = ['settings.js', 'physics.js', 'game.js'];
+    // 設定 → 動きの計算 → 海・山・雲の描き方 → 描画 の順番で読みこむ。
+    const files = ['settings.js', 'physics.js', 'nature.js', 'game.js'];
     function loadNext() {
       if (!files.length) return;
       const script = document.createElement('script');
-      script.src = files.shift() + '?v=20260913-summer-sky-v6';
+      script.src = files.shift() + '?v=20260924-nature-code-v1';
       script.onload = loadNext;
       script.onerror = () => {
         document.querySelector('#startScreen p').textContent = 'ゲームのファイルを読み込めませんでした。ページを更新してください。';

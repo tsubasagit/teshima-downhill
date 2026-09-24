@@ -154,41 +154,8 @@ function buildWindLines() {
 
 const wind = buildWindLines();
 
-// 海の時間はゲームと共有する。一時停止時も波の位相が飛ばない。
+// 海・空・雲の時間はゲームと共有する。一時停止時も波の位相が飛ばない。
 const oceanTime = { value: 0 };
-function shadeOcean(material) {
-  material.onBeforeCompile = shader => {
-    shader.uniforms.oceanTime = oceanTime;
-    shader.vertexShader = 'varying vec3 oceanWorld;\n' + shader.vertexShader;
-    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
-      #include <begin_vertex>
-      oceanWorld = (modelMatrix * vec4(position, 1.0)).xyz;
-    `);
-    shader.fragmentShader = 'varying vec3 oceanWorld;\nuniform float oceanTime;\n' + shader.fragmentShader;
-    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
-      #include <map_fragment>
-      vec2 water = oceanWorld.xz;
-      float w1 = dot(water, vec2(0.18, 0.11)) + oceanTime * 0.65;
-      float w2 = dot(water, vec2(-0.09, 0.24)) - oceanTime * 0.48;
-      float rippleFade = 1.0 - smoothstep(60.0, 600.0, distance(cameraPosition, oceanWorld));
-      vec3 normalWater = normalize(vec3((-0.025*cos(w1)-0.012*cos(w2))*rippleFade, 1.0,
-        (-0.015*cos(w1)+0.028*cos(w2))*rippleFade));
-      vec3 viewWater = normalize(cameraPosition - oceanWorld);
-      float fresnelWater = pow(1.0 - max(dot(normalWater, viewWater), 0.0), 4.0);
-      vec3 sunWater = normalize(vec3(-0.35, 0.48, -0.6));
-      float glint = pow(max(dot(normalWater, normalize(viewWater + sunWater)), 0.0), 96.0);
-      float broadLight = 0.99 + (0.005*sin(w1) + 0.005*sin(w2))*rippleFade;
-      // 絵の模様を少し残した穏やかな水色。遠くほど水平線の色へなじませる。
-      float textureStrength = mix(0.42, 0.18, smoothstep(350.0, 2300.0, distance(cameraPosition, oceanWorld)));
-      vec3 seaBase = mix(vec3(0.12,0.53,0.63), diffuseColor.rgb, textureStrength) * broadLight;
-      diffuseColor.rgb = mix(seaBase, vec3(0.57,0.77,0.81), fresnelWater * 0.48);
-      // 遠くの細かいハイライトは弱め、走行中のちらつきを抑える。
-      float detailFade = 1.0 - smoothstep(180.0, 1100.0, distance(cameraPosition, oceanWorld));
-      diffuseColor.rgb += vec3(0.85,0.88,0.73) * glint * 0.35 * detailFade;
-    `);
-  };
-  material.customProgramCacheKey = () => 'setouchi-water-light-v3';
-}
 
 // 人物画像から独立した接地影。カメラへ向けず、実際の道路勾配に沿わせる。
 const contactShadow = new THREE.Mesh(new THREE.PlaneGeometry(1.45, 2.45),
@@ -305,6 +272,10 @@ function sharedGeo(key, make) {
   if (!SHARED_GEO.has(key)) SHARED_GEO.set(key, make());
   return SHARED_GEO.get(key);
 }
+// 島や山なみの地形は、形の数字が同じなら毎周まったく同じになる。作りなおさず使いまわす。
+function sharedTerrain(kind, shape, make) {
+  return sharedGeo(`${kind}:${JSON.stringify(shape)}`, () => make(shape));
+}
 function sharedMat(key, make) {
   if (!SHARED_MAT.has(key)) SHARED_MAT.set(key, make());
   return SHARED_MAT.get(key);
@@ -420,7 +391,7 @@ function applyPendingRebuilds() {
     player = buildPlayer();
   }
   const sceneryKeys = [
-    'shop', 'cloud', 'ground', 'fantasyGrass', 'fantasyGrassB', 'fantasyGrassC',
+    'shop', 'ground', 'fantasyGrass', 'fantasyGrassB', 'fantasyGrassC',
     'fantasyTreeA', 'fantasyTreeB', 'fantasyTerrace', 'fantasyBranch',
     'fantasyHedge',
     'fantasyGrove', 'fantasySlope', 'harborMirror', 'harborSeawall',
@@ -436,34 +407,16 @@ function applyPendingRebuilds() {
   }
 }
 
-// 晴天の空のドーム。水平線は淡く、上空は鮮やかな夏の青にする。
-const skyDome = new THREE.Mesh(
-  new THREE.SphereGeometry(1800, 32, 16),
-  new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false,
-    vertexShader: `varying vec3 skyDirection;
-      void main() { skyDirection = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-    fragmentShader: `varying vec3 skyDirection;
-      void main() {
-        vec3 direction = normalize(skyDirection);
-        float height = pow(smoothstep(0.0,0.45,max(direction.y,0.0)),0.48);
-        vec3 color = mix(vec3(0.84,0.95,0.99),vec3(0.015,0.38,0.96),height);
-        float sun = pow(max(dot(direction,normalize(vec3(-0.55,0.48,-0.7))),0.0),240.0);
-        float glow = pow(max(dot(direction,normalize(vec3(-0.55,0.48,-0.7))),0.0),12.0);
-        color += vec3(0.22,0.20,0.12)*glow + vec3(0.38,0.34,0.22)*sun;
-        gl_FragColor = vec4(color,1.0);
-      }`
-  })
-);
+// 晴天の空のドーム。水平線は淡く、上空は鮮やかな夏の青。すじ雲もコードで描く（nature.js）。
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(1800, 32, 16), createSkyMaterial(oceanTime));
 skyDome.visible = true;
 scene.add(skyDome);
 
-// 空はコードで描くので、空画像のダウンロードは不要。
-loadTex('sea', 'sea_surface_setouchi_v3.webp', undefined, 'sea_surface_fantasy_v2.jpg');
+// 空・海・雲はコードで描くので（nature.js）、その画像はダウンロードしない。
 loadTex('road', 'road_asphalt_teshima.jpg', undefined, 'road_stone_tile.jpg');
 loadTex('wall', 'stone_wall_tile.jpg');
 loadTex('ground', 'meadow_ground_v3.jpg', undefined, 'meadow_ground_v2.jpg');
 loadTex('shop', 'shop_front.jpg');
-loadTex('cloud', 'cloud_cumulus.webp');
 loadTex('fantasyGrass', 'grass_fantasy.webp');
 loadTex('fantasyGrassB', 'grass_fantasy_b.webp');
 loadTex('fantasyGrassC', 'grass_fantasy_c.webp');
@@ -641,30 +594,15 @@ function buildWall(path, offset, height, material, yBase = 0, uvRepeat = 0) {
 
 
 /* ------------------------- 風景の部品 ------------------------- */
-function makeCloudCluster(rng, tall = false) {
-  // 画像があれば1枚絵の板（つねにカメラを向く）
-  if (TEX.cloud) {
-    const g = new THREE.Group();
-    const mat = softenSceneryEdges(new THREE.MeshBasicMaterial({ map: TEX.cloud, transparent: true, opacity: 0.97, depthWrite: false, fog: false }));
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, tall ? 2.4 : 1.6), mat);
-    // 同じ絵の使いまわしなので、半分は左右反転して並びの繰り返しを目立たなくする
-    if (rng() < 0.5) plane.scale.x = -1;
-    g.add(plane);
-    g.userData.billboard = true;
-    g.userData.sky = true;   // 空にうかぶ板だけは、カメラのかたむきごと向く
-    return g;
-  }
+// 雲は画像ではなく、1枚の板にノイズで描く（nature.js の createCloudMaterial）。
+// seed が雲ごとの形、lightSide が太陽の来る向き（-1 左 〜 1 右）。
+function makeCloudCluster(rng, tall = false, lightSide = 0) {
   const g = new THREE.Group();
-  const matWhite = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
-  const matShade = new THREE.MeshBasicMaterial({ color: 0xdcedf5, fog: false });
-  const n = tall ? 10 : 5 + Math.floor(rng() * 3);
-  for (let i = 0; i < n; i++) {
-    const r = 0.6 + rng() * 0.9;
-    const puff = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 6), i % 4 === 3 ? matShade : matWhite);
-    puff.position.set((rng() - 0.5) * 3.2, tall ? rng() * 2.6 : rng() * 0.9, (rng() - 0.5) * 1.6);
-    puff.scale.y = 0.72;
-    g.add(puff);
-  }
+  const width = 2, height = tall ? 2.4 : 1.6;
+  const mat = createCloudMaterial(oceanTime, 1 + rng() * 97, width / height, lightSide);
+  g.add(new THREE.Mesh(sharedGeo(tall ? 'cloud-plane-tall' : 'cloud-plane', () => new THREE.PlaneGeometry(width, height)), mat));
+  g.userData.billboard = true;
+  g.userData.sky = true;   // 空にうかぶ板だけは、カメラのかたむきごと向く
   return g;
 }
 
@@ -1677,14 +1615,10 @@ function buildScenery(path, totalLength) {
   const seaGroup = new THREE.Group();
   seaGroup.position.copy(end.pos);
   seaGroup.rotation.y = -end.heading;
-  // 海の画像も折り返して連続させ、タイルの端の色差が直線として出るのを防ぐ。
-  const seaMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: true });
-  seaMaterial.userData.seamlessRepeat = true;
-  shadeOcean(seaMaterial);
-  const deepSea = new THREE.Mesh(
-    new THREE.PlaneGeometry(16000, 16000),
-    useTex('sea', seaMaterial, [22, 22])
-  );
+  // 海は画像を貼らず、波・透ける海底・光の網・白波をコードで描く（nature.js）。
+  // 浅瀬の形は、組み立てたあとに陸地を真上から測って決める（buildWorld の bakeShoreMap）。
+  const seaMaterial = createOceanMaterial(oceanTime, CONFIG.waterClearness ?? 1);
+  const deepSea = new THREE.Mesh(new THREE.PlaneGeometry(16000, 16000), seaMaterial);
   deepSea.rotation.x = -Math.PI / 2;
   // 遠端をカメラの描画距離より先へ送り、海の板が山形に見える境界をなくす。
   deepSea.position.set(0, seaY - end.pos.y, 0);
@@ -1692,7 +1626,7 @@ function buildScenery(path, totalLength) {
   deepSea.name = 'ocean-surface';
   motionActors.seas.push(deepSea);
   // 海面を2枚重ねると遠景でZ-fighting（ちらつき）が起きるため、
-  // 色の変化は模様入りテクスチャ1枚だけで表現する。
+  // 浅瀬も深い海も、この1枚の中で色を変えて表現する。
   worldGroup.add(seaGroup);
 
   // 港のフェリーと小舟は防波壁より沖に配置する。
@@ -1714,37 +1648,42 @@ function buildScenery(path, totalLength) {
   }
 
   // 防波壁の先に大小の島影を重ね、海を単色の帯に見せない。
-  const islandMat = new THREE.MeshLambertMaterial({ color: 0x568e83 });
-  for (const [side, ahead, r] of [
+  // 島は円すいではなく、尾根と谷・木のしげみ・砂浜まで描いた地形（nature.js）。
+  const islandMat = sharedMat('terrain-island', () => createTerrainMaterial());
+  islandMat.uniforms.seaLevel.value = seaY;
+  [
     [-420, 470, 72], [-270, 610, 48], [-145, 430, 32], [-35, 780, 92],
     [85, 520, 41], [210, 640, 58], [330, 450, 38], [470, 720, 76],
-  ]) {
+  ].forEach(([side, ahead, r], n) => {
     const islP = end.pos.clone().addScaledVector(end.forward, ahead).addScaledVector(end.right, side);
-    const isl = new THREE.Mesh(new THREE.ConeGeometry(r, r * 0.4, 7), islandMat);
-    isl.position.set(islP.x, seaY + 1, islP.z);
+    const shape = {
+      x: islP.x, z: islP.z, rx: r, rz: r * (0.7 + rng() * 0.3), height: r * 0.42,
+      seaY, seed: 40 + n, tint: 0xf2fbf2, rings: 16, slices: 72,
+    };
+    const isl = new THREE.Mesh(sharedTerrain('island', shape, makeIslandGeometry), islandMat);
+    isl.name = `harbor-island-${n}`;
     worldGroup.add(isl);
-  }
+  });
 
-  // 対岸の山なみ。遠い層ほど空の色に近づけると、いっきに奥ゆきが出る。
-  // 山をひとつずつ離して置くと「海にうかぶサメのひれ」に見えてしまう。
-  // 半径を となり同士の間隔より大きくして重ね、ひとつづきの稜線にする。
-  const ridgeTints = [0x8fb6c6, 0xa6c8d4, 0xbad7de];
+  // 対岸の山なみ。横に長い地形の帯を重ね、遠い層ほど空の色にとかして奥ゆきを出す。
+  // 稜線は尾根ノイズで ひとつづきにする（山をひとつずつ置くと「サメのひれ」に見える）。
+  // 遠いので、もやの上限を高めにして、それでも輪郭は消さない。
+  const ridgeMat = sharedMat('terrain-ridge', () => createTerrainMaterial({ hazeDensity: 0.0009, hazeMax: 0.72, detailScale: 0.03 }));
+  ridgeMat.uniforms.seaLevel.value = seaY;
+  const ridgeTints = [0xd6ecf0, 0xe4f2f4, 0xf0f8f8];
   for (let layer = 0; layer < CONFIG.ridgeLayers; layer++) {
     const ahead = 1250 + layer * 420;
     const scale = 1 + layer * 0.45;
-    const gap = 150 * scale;
-    // 霧の色を焼きこんだ単色。fog を切らないと遠すぎて消えてしまう。
-    const ridgeMat = new THREE.MeshBasicMaterial({ color: ridgeTints[layer] || 0xbad7de, fog: false });
-    for (let i = -7; i <= 7; i++) {
-      const r = gap * 1.15 + rng() * gap * 0.5;
-      // 高さは半径の2割ほど。とがらせるほど「対岸の島」ではなく「岩」に見える。
-      const peak = new THREE.Mesh(new THREE.ConeGeometry(r, r * (0.17 + rng() * 0.09), 6), ridgeMat);
-      const rp = end.pos.clone()
-        .addScaledVector(end.forward, ahead + (rng() - 0.5) * 160)
-        .addScaledVector(end.right, i * gap + (rng() - 0.5) * 45);
-      peak.position.set(rp.x, seaY, rp.z);
-      worldGroup.add(peak);
-    }
+    const ridge = new THREE.Mesh(sharedTerrain('ridge', {
+      width: 150 * scale * 16, depth: 260 * scale, height: 150 * scale * (0.3 + rng() * 0.08),
+      seed: 70 + layer, tint: ridgeTints[layer] || 0xf0f8f8,
+    }, makeRidgeGeometry), ridgeMat);
+    const rp = end.pos.clone().addScaledVector(end.forward, ahead);
+    ridge.position.set(rp.x, seaY, rp.z);
+    // 帯の奥行き（ローカル +z）を、港から見て沖の方向へ向ける
+    ridge.rotation.y = Math.atan2(end.forward.x, end.forward.z);
+    ridge.name = `ridge-layer-${layer}`;
+    worldGroup.add(ridge);
   }
 
   // 養殖いかだ。海面に黒い点列があるだけで「生きている瀬戸内海」になる。
@@ -1760,13 +1699,12 @@ function buildScenery(path, totalLength) {
   }
 
   // 右手にそびえる壇山の稜線。「平らな緑」を断ち切る。
-  // MeshLambertMaterial は flatShading を持たない（警告が出るだけで効かない）ので Phong を使う。
-  // 山は霧（260ユニットから）より手前に立つので、霧では ぼかせない。
-  // かわりに 奥の列ほど空の色をまぜた緑にして、自前で かすませる。
-  const mountainMats = [
-    new THREE.MeshPhongMaterial({ color: 0x5f8d55, flatShading: true, shininess: 2 }),
-    new THREE.MeshPhongMaterial({ color: 0x86a882, flatShading: true, shininess: 2 }),
-  ];
+  // 円すいではなく、ノイズでゆがめた丸い山に、木のしげみと こけむした岩肌を描く（nature.js）。
+  // 山は霧（520ユニットから）より手前に立つので、材質の中の「空気遠近法」でかすませる。
+  // 形は5種類を使いまわし、向きと大きさを変えて置く（周回ごとに作りなおさない）。
+  const hillMat = sharedMat('terrain-hill', () => createTerrainMaterial({ hazeDensity: 0.0016, detailScale: 0.09 }));
+  hillMat.uniforms.seaLevel.value = seaY;
+  const hillTints = [0xffffff, 0xe6f0ea];
   // 港の手前 300 ユニットには置かない（内陸の斜面を寝かせて海を見せる区間）
   for (let d = 60; d < totalLength - 300; d += 110) {
     const s = sampleAt(path, d);
@@ -1774,7 +1712,14 @@ function buildScenery(path, totalLength) {
     for (let k = 0; k < 2; k++) {
       const r = 62 + rng() * 46;
       // とがらせるほど「山」ではなく「三角の板」に見える。低くて丸い稜線にする。
-      const hill = new THREE.Mesh(new THREE.ConeGeometry(r, r * (0.32 + rng() * 0.16), 7), mountainMats[k]);
+      const hillHeight = r * (0.32 + rng() * 0.16);
+      const variant = Math.floor(rng() * 5);
+      const hill = new THREE.Mesh(
+        sharedGeo(`hill-${variant}-${k}`, () => makeHillGeometry(200 + variant, hillTints[k])),
+        hillMat
+      );
+      hill.scale.set(r, hillHeight, r);
+      hill.rotation.y = rng() * Math.PI * 2;
       // 内陸の斜面の外がわに置き、その裾から山が続いて見えるようにする
       const offset = roadHalf + 78 + r * 0.45 + k * 46 + rng() * 22;
       // 曲がりの内がわへ はみ出す山と、内陸の斜面が寝ている所の山は置かない
@@ -1783,17 +1728,19 @@ function buildScenery(path, totalLength) {
       const hp = s.pos.clone().addScaledVector(s.right, offset);
       // ふもとは内陸の斜面（高さ14）のうしろに隠し、いただきだけを出す。
       // 持ち上げすぎると海の上に浮き、沈めすぎると まったく見えなくなる。
-      hill.position.set(hp.x, s.pos.y + 2 + k * 6, hp.z);
+      // （丸い山の原点は ふもと。円すいだったころと同じ いただきの高さにそろえる）
+      hill.position.set(hp.x, s.pos.y + 2 + k * 6 - hillHeight / 2, hp.z);
       worldGroup.add(hill);
     }
   }
 
   // 遠い夏雲を全方位へ。カーブの向きや坂の標高によらず青空に雲が見える。
-  // 34枚の軽い画像を2段へずらし、青い余白と大きな白い雲を交互に並べる。
+  // 34枚の雲の板を2段へずらし、青い余白と大きな白い雲を交互に並べる。
   cloudSky = new THREE.Group();
   cloudSky.position.copy(camera.position);
   worldGroup.add(cloudSky);
   const cloudRng = mulberry32(9132026);
+  const sunAzimuth = Math.atan2(NATURE_SUN_DIR.x, NATURE_SUN_DIR.z);
   for (let i = 0; i < 34; i++) {
     const upper = i >= 20;
     const count = upper ? 14 : 20;
@@ -1802,11 +1749,15 @@ function buildScenery(path, totalLength) {
     const elevation = upper ? 0.38 + cloudRng() * 0.2 : 0.15 + cloudRng() * 0.1;
     const radius = 1250;
     const tall = i % 5 === 0;
-    const cloud = makeCloudCluster(cloudRng, tall);
+    // 太陽が雲の右にあるか左にあるか（見る向きで変わる）。日なた側を明るく描く。
+    const cloud = makeCloudCluster(cloudRng, tall, Math.sin(angle - sunAzimuth) * 0.9);
     cloud.position.set(Math.sin(angle) * radius, radius * elevation, Math.cos(angle) * radius);
     cloud.scale.setScalar((upper ? 115 : 95) + cloudRng() * 65);
     cloud.scale.x *= tall ? 0.95 : 1.1 + cloudRng() * 0.65;
     cloud.scale.y *= tall ? 1 : 0.6 + cloudRng() * 0.25;
+    // 板を横に伸ばしても、もこもこが つぶれないよう、見た目の縦横比を材質へ伝える
+    const cloudMat = cloud.children[0].material;
+    cloudMat.uniforms.aspect.value *= cloud.scale.x / cloud.scale.y;
     cloudSky.add(cloud);
     if (cloud.userData.billboard) billboards.push(cloud);
     rememberMotion(cloud, 'clouds', cloudRng() * Math.PI * 2);
@@ -1839,46 +1790,21 @@ function buildScenery(path, totalLength) {
 // 海面から盛り上がる島。輪を重ねた地形なので、円すいの尖りを作らない。
 function buildPanoramaIslands(path, length) {
   const seaY = sampleAt(path, length).pos.y - 1.45;
-  const rng = mulberry32(9132026);
   const islands = [
     [-310, -440, 120, 72, 42], [-570, -680, 200, 108, 85],
     [35, -940, 235, 110, 100], [-780, -1160, 285, 145, 125],
     [360, -1450, 320, 170, 120], [-310, -1780, 390, 200, 140],
     [-1270, -1900, 430, 200, 150], [810, -2050, 400, 220, 160],
   ];
+  // 陸の端を海面より上に置き、その外周から海中へ垂直な裾を伸ばす（makeIslandGeometry）。
+  // 広く平たい三角形を海面と交差させないので、波打ち際が点滅しない。
+  // 遠い島ほど青くかすむのは、材質の中の空気遠近法にまかせる。
+  const islandMat = sharedMat('terrain-island', () => createTerrainMaterial());
+  islandMat.uniforms.seaLevel.value = seaY;
   for (let n = 0; n < islands.length; n++) {
     const [x,z,rx,rz,height] = islands[n];
-    const vertices = [], colors = [], indices = [];
-    const rings = 14, slices = 64;
-    const tint = new THREE.Color(n < 3 ? 0x4c8e85 : n < 6 ? 0x81b3ba : 0xa7cad0);
-    const phase = rng() * 6.28;
-    // 陸の端を海面より上に置き、その外周から海中へ垂直な裾を伸ばす。
-    // 広く平たい三角形を海面と交差させないので、波打ち際が点滅しない。
-    for (let r = 0; r <= rings + 1; r++) {
-      const radius = Math.min(r, rings) / rings;
-      const underwater = r > rings;
-      for (let j = 0; j <= slices; j++) {
-        const a = j / slices * Math.PI * 2;
-        const shore = 1 + 0.10*Math.sin(a*3+phase) + 0.06*Math.cos(a*5-phase);
-        const u = Math.cos(a)*radius, v = Math.sin(a)*radius;
-        const peakA = Math.exp(-((u+0.28)**2*7+(v-0.03)**2*4));
-        const peakB = Math.exp(-((u-0.30)**2*10+(v+0.08)**2*7));
-        const h = (peakA*0.66+peakB*0.8) * (1-Math.pow(radius,6)) * height;
-        vertices.push(x+Math.cos(a)*rx*radius*shore, seaY + (underwater ? -6 : 0.8 + h), z+Math.sin(a)*rz*radius*shore);
-        const c = tint.clone().multiplyScalar(0.88+0.16*h/height);
-        if (r >= rings) c.setHex(underwater ? 0x728f85 : 0xc7cfaf);
-        colors.push(c.r,c.g,c.b);
-        if (r <= rings && j < slices) {
-          const i = r*(slices+1)+j;
-          indices.push(i,i+1,i+slices+1, i+1,i+slices+2,i+slices+1);
-        }
-      }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
-    geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
-    geo.setIndex(indices); geo.computeVertexNormals();
-    const island = new THREE.Mesh(geo,new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide}));
+    const shape = { x, z, rx, rz, height, seaY, seed: n + 1, tint: n < 3 ? 0xffffff : n < 6 ? 0xeef6f0 : 0xe4f0ec };
+    const island = new THREE.Mesh(sharedTerrain('island', shape, makeIslandGeometry), islandMat);
     island.name = `panorama-island-${n}`;
     island.userData.seaLevel = seaY;
     worldGroup.add(island);
@@ -2218,9 +2144,39 @@ function buildWorld() {
   buildScenery(state.path, state.totalLength);
   buildCoastalModels(state.path, state.totalLength);
   buildPanoramaIslands(state.path, state.totalLength);
+  measureShoreline(state.path, state.totalLength);
   // 障害物を置かず、海へ落ちる坂と大きな右カーブの動きを主役にする。
   state.items = [];
   worldBuilt = true;
+}
+
+// 陸地を真上から測り、海の浅瀬・透ける海底・白波の位置を決める（nature.js の bakeShoreMap）。
+// コースの形を変えても、岸の形はここで自動的に作りなおされる。
+let shorelineKey = '';
+function measureShoreline(path, length) {
+  const seaY = sampleAt(path, length).pos.y - 1.45;
+  const bounds = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+  const grow = (x, z, margin) => {
+    bounds.minX = Math.min(bounds.minX, x - margin); bounds.maxX = Math.max(bounds.maxX, x + margin);
+    bounds.minZ = Math.min(bounds.minZ, z - margin); bounds.maxZ = Math.max(bounds.maxZ, z + margin);
+  };
+  for (let i = 0; i < path.length; i += 10) grow(path[i].x, path[i].z, 320);
+  worldGroup.traverse(object => {
+    if (!object.isMesh || !/^(panorama|harbor)-island-/.test(object.name)) return;
+    object.geometry.computeBoundingBox();
+    const box = object.geometry.boundingBox;
+    grow((box.min.x + box.max.x) / 2, (box.min.z + box.max.z) / 2, Math.max(box.max.x - box.min.x, box.max.z - box.min.z) / 2 + SHORE_RANGE);
+  });
+  // 正方形にそろえる（1マスの大きさを縦横で同じにする）
+  const size = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ);
+  const cx = (bounds.minX + bounds.maxX) / 2, cz = (bounds.minZ + bounds.maxZ) / 2;
+  // 同じコースなら岸の形も同じ。周回のたびに測りなおさない。
+  const key = [path.length, seaY, cx, cz, size].map(v => v.toFixed(2)).join('|');
+  if (key === shorelineKey) return;
+  shorelineKey = key;
+  bakeShoreMap(renderer, worldGroup, seaY,
+    { minX: cx - size / 2, maxX: cx + size / 2, minZ: cz - size / 2, maxZ: cz + size / 2 },
+    object => object.name === 'ocean-surface' || object === cloudSky || object.userData.billboard || /^ridge-layer-/.test(object.name));
 }
 
 function resetRun() {
@@ -2504,8 +2460,8 @@ function updateSceneryMotion(time, dt) {
   for (const cloud of motionActors.clouds) {
     cloud.position.x = cloud.userData.motionBaseX + Math.sin(time * 0.08 + cloud.userData.motionPhase) * 2.2;
   }
-  // 海面画像は世界に固定する。時間による光の変化だけを shadeOcean で描く。
-  // 画像全体を流すと、岸まで滑って動くように見えてしまう。
+  // 海面の板は世界に固定する。波・光の網・白波は時間 oceanTime を使って nature.js の中で動かす。
+  // 板そのものを流すと、岸まで滑って動くように見えてしまう。
 
 }
 

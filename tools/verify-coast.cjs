@@ -22,10 +22,10 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         const mesh=new THREE.Mesh(object.geometry,object===sea?seaMaterial:landMaterial);
         mesh.matrix.copy(object.matrixWorld);mesh.matrixAutoUpdate=false;isolated.add(mesh);
       }
-      const offsetBefore=sea.material.map.offset.clone();
+      const seaBefore=sea.matrixWorld.toArray();
       const matricesBefore=islands.map(island=>island.matrixWorld.toArray());
       updateSceneryMotion(20,0.5);scene.updateMatrixWorld(true);
-      const fixedTexture=offsetBefore.equals(sea.material.map.offset);
+      const fixedSea=sea.matrixWorld.toArray().every((value,i)=>value===seaBefore[i]);
       const fixedLand=islands.every((island,index)=>island.matrixWorld.toArray().every((value,i)=>value===matricesBefore[index][i]));
       const cam=camera.clone();
       const target=new THREE.WebGLRenderTarget(550,350,{depthTexture:new THREE.DepthTexture(550,350,THREE.UnsignedIntType)});
@@ -50,10 +50,10 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       }
       renderer.setRenderTarget(null);renderer.setClearColor(clearColor,clearAlpha);
       target.dispose();landMaterial.dispose();seaMaterial.dispose();
-      return {measurements,fixedTexture,fixedLand,islandCount:islands.length,bank:state.cameraBank};
+      return {measurements,fixedSea,fixedLand,islandCount:islands.length,bank:state.cameraBank};
     });
     console.log({maxMismatchedPixels:Math.max(...result.measurements.map(s=>s.mismatch)),maxMismatchRatio:Math.max(...result.measurements.map(s=>s.mismatch/s.land))});
-    assert.equal(result.islandCount,8);assert.equal(result.fixedTexture,true);assert.equal(result.fixedLand,true);assert.equal(result.bank,0);
+    assert.equal(result.islandCount,8);assert.equal(result.fixedSea,true);assert.equal(result.fixedLand,true);assert.equal(result.bank,0);
     for(const sample of result.measurements){
       assert.ok(sample.land>1000,'test must actually see the coastline');
       assert.ok(sample.mismatch<=Math.max(12,sample.land*0.001),`unstable coast: ${JSON.stringify(sample)}`);

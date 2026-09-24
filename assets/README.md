@@ -19,8 +19,8 @@
 | `skater_left_v2.webp` | 左へ曲がるときのプレイヤー姿勢（透過） |
 | `skater_right.webp` | 右へ曲がるときのプレイヤー姿勢（透過） |
 | `sky_sea_panorama.jpg` | 空のドーム（背景ぜんたい） |
-| `sea_surface_fantasy_v2.jpg` | 海（手前の浅瀬 と 沖）にタイル状に貼る |
-| `cloud_cumulus.webp` | 空にうかぶ雲13個 と ゴール手前の入道雲 |
+| `sea_surface_fantasy_v2.jpg` | （2026-09-24 から未使用。海は nature.js のコードで描く） |
+| `cloud_cumulus.webp` | （2026-09-24 から未使用。雲は nature.js のコードで描く） |
 | `shop_front.jpg` | 道ぞいの商店 |
 | `road_asphalt_teshima.jpg` | 道路の石だたみ |
 | `stone_wall_tile.jpg` | 道の両わきの石垣 |

@@ -55,6 +55,7 @@ const CONFIG = {
   guidePostSpacing: 7,    // 大カーブの黄色ポールの間隔
   raftCount: 9,           // 海にうかぶ養殖いかだの数
   ridgeLayers: 3,         // 対岸の山なみのレイヤー数
+  waterClearness: 1,      // 海のすきとおり具合。2で底までくっきり、0.4でにごった海
   groundTileSize: 30,     // 地面の絵1枚が覆う広さ（ユニット）。大きいほど筆づかいが大きく出る
   sceneryViewDistance: 480, // 追加した絵は近い区間だけ描画する
   harborRunout: 150,      // ゴールの先に残す陸地。海までの安全な余白
